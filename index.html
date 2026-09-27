@@ -254,114 +254,158 @@ function setKey(v){ try{ localStorage.setItem('anthropicKey',v); }catch(e){} }
 // break, and we timestamp each one, so a long gap means a new sentence and a
 // short one means the same thought continued.
 
-var SENTENCE_GAP_MS = 900;
+// Sentence breaks come from the recogniser, not from a stopwatch.
+//
+// The first version timed the gaps between final results and split on anything
+// over 900ms. That measured when Chrome got round to emitting a result, not
+// when he actually paused, so full stops landed in the middle of sentences.
+// Chrome already ends a result at a real acoustic pause, so one final result
+// is now one sentence - unless it opens with a joining word, which is a
+// linguistic signal rather than a timing one and far more reliable.
 
-// Interrogatives, with and without the accent - the recogniser routinely drops
-// accents, and they are inaudible anyway, so restoring them cannot hide a
-// mistake he actually made out loud.
-var Q_WORDS = {
-  'que':'qué', 'qué':'qué', 'quien':'quién', 'quién':'quién',
-  'quienes':'quiénes', 'quiénes':'quiénes', 'como':'cómo', 'cómo':'cómo',
-  'cuando':'cuándo', 'cuándo':'cuándo', 'donde':'dónde', 'dónde':'dónde',
-  'adonde':'adónde', 'adónde':'adónde', 'cual':'cuál', 'cuál':'cuál',
-  'cuales':'cuáles', 'cuáles':'cuáles', 'cuanto':'cuánto', 'cuánto':'cuánto',
-  'cuanta':'cuánta', 'cuantos':'cuántos', 'cuantas':'cuántas', 'porque':'por qué'
+var CONTINUERS = ['y','e','o','u','pero','porque','pues','entonces','tambien',
+  'también','aunque','mientras','ni','con','sin','para','por','de','del','en',
+  'al','a','que'];
+var COMMA_BEFORE = ['pero','porque','aunque','entonces','pues','mientras'];
+
+// Interrogatives that are nearly always a question when they open a phrase.
+var Q_STRONG = {
+  'donde':'dónde','dónde':'dónde','adonde':'adónde','adónde':'adónde',
+  'quien':'quién','quién':'quién','quienes':'quiénes','quiénes':'quiénes',
+  'cual':'cuál','cuál':'cuál','cuales':'cuáles','cuáles':'cuáles',
+  'cuanto':'cuánto','cuánto':'cuánto','cuanta':'cuánta','cuánta':'cuánta',
+  'cuantos':'cuántos','cuántos':'cuántos','cuantas':'cuántas','cuántas':'cuántas',
+  'qué':'qué','cómo':'cómo','cuándo':'cuándo'
 };
 
-// Deliberately tight. A statement wrongly marked as a question is worse than a
-// question left as a statement, so only openers that are nearly always
-// questions are listed here.
+// The same words without their accent double as ordinary connectors - "como
+// siempre llego tarde" is a statement, "como estas" is a question. Length is
+// the only usable signal, so these count only in a very short phrase.
+var Q_WEAK = { 'que':'qué', 'como':'cómo', 'cuando':'cuándo' };
+var Q_WEAK_MAX_WORDS = 3;
+// ...or when a verb (or the pronoun in front of one) follows straight after.
+// "como esta usted hoy" is a question; "como siempre llego tarde" is not, and
+// the difference is the second word, not the length.
+var Q_WEAK_NEXT = ['es','son','esta','está','estas','estás','estan','están',
+  'fue','fueron','hay','tiene','tienes','tienen','puedo','puede','puedes',
+  'quiere','quieres','quiero','significa','significan','dice','dices','dijo',
+  'llama','llamas','va','vas','van','hace','haces','hizo','sabe','sabes',
+  'piensa','piensas','vive','vives','viven','trabaja','trabajas','estudia',
+  'estudias','gusta','gustan','cuesta','cuestan','pasa','paso','pasó','llego',
+  'llegó','sirve','funciona','dura','empieza','termina','entiende','entiendes',
+  'necesito','necesita','debo','debe','quisiera',
+  'vienes','viene','vienen','vengo','sales','sale','salen','comes','come',
+  'comen','lees','lee','leen','oras','ora','oran','rezas','reza','llegas',
+  'llega','llegan','regresas','regresa','regresan','vuelves','vuelve','ayudas',
+  'ayuda','ayudan','enseñas','enseña','aprendes','aprende','hablas','habla',
+  'hablan','escuchas','escucha','miras','mira','sientes','siente','crees',
+  'cree','creen','recuerdas','recuerda','duermes','duerme','conociste',
+  'se','te','me','le','les','nos'];
+
+// Yes/no openers. Deliberately tight: marking a statement as a question is
+// worse than missing one, and "esta bien" is usually someone saying it is fine.
 var Q_STARTERS = ['puedo','puede','puedes','podemos','pueden','podria','podría',
   'podrias','podrías','quisiera','tiene','tienes','tienen','hay','quiere',
   'quieres','quieren','sabe','sabes','saben','conoce','conoces','necesita',
-  'necesitas','te gusta','le gusta','les gusta','me puede','me puedes',
-  'nos puede','esta bien','está bien','verdad'];
+  'necesitas','te gusta','le gusta','les gusta','me puede','me puedes','nos puede'];
 
-var Q_TAGS = ['verdad','no','cierto','si o no','sí o no','ok','okey'];
+// Only unambiguous tags. A bare "no" used to be in here, which turned
+// "creo que no" into "?Creo que, no?".
+var Q_TAGS = ['verdad','cierto','no es cierto','si o no','sí o no'];
 
 var EXCLAIM = ['que bueno','qué bueno','que padre','qué padre','que chido',
   'qué chido','que bonito','qué bonito','que rico','qué rico','que lastima',
   'qué lástima','que pena','qué pena','que bien','qué bien','que gusto','qué gusto'];
 
+var STRIP_CHARS = '.,;:!?¿¡"';
+
+function words_(t){
+  return String(t||'').split(' ').filter(function(w){ return w.length; });
+}
 function normalise_(t){
-  return String(t||'').toLowerCase().replace(/[.,;:!?¿¡]/g,'').replace(/\s+/g,' ').trim();
+  var s=String(t||'').toLowerCase(), out='';
+  for(var i=0;i<s.length;i++){
+    var ch=s.charAt(i);
+    if(STRIP_CHARS.indexOf(ch)===-1) out+=ch;
+  }
+  return words_(out).join(' ');
+}
+function trimEnds_(t){
+  var s=String(t||'').trim();
+  while(s.length && STRIP_CHARS.indexOf(s.charAt(s.length-1))>-1) s=s.slice(0,-1);
+  while(s.length && (s.charAt(0)==='¿'||s.charAt(0)==='¡')) s=s.slice(1);
+  return s.trim();
 }
 
 function looksLikeQuestion(text){
-  var t = normalise_(text);
+  var t=normalise_(text);
   if(!t) return false;
-  var words = t.split(' ');
-  if(Q_WORDS[words[0]]) return true;
-  if(words.length > 1 && (words[0]+' '+words[1]) === 'por que') return true;
+  var w=words_(t);
+  if(Q_STRONG[w[0]]) return true;
+  if(w.length>1 && (w[0]+' '+w[1])==='por que') return true;
+  if(w.length>1 && (w[0]+' '+w[1])==='para que') return true;
+  if(Q_WEAK[w[0]] && (w.length<=Q_WEAK_MAX_WORDS || Q_WEAK_NEXT.indexOf(w[1])>-1)) return true;
   for(var i=0;i<Q_STARTERS.length;i++){
-    var st = Q_STARTERS[i];
-    if(t === st || t.indexOf(st+' ') === 0) return true;
+    var st=Q_STARTERS[i];
+    if(t===st || t.indexOf(st+' ')===0) return true;
   }
-  // a tag on the end - "esta bien, verdad"
-  if(words.length >= 3){
-    var tail = words[words.length-1];
-    var tail2 = words.slice(-3).join(' ');
+  if(w.length>=3){
+    var last=w[w.length-1], last3=w.slice(-3).join(' ');
     for(var j=0;j<Q_TAGS.length;j++){
-      if(tail === Q_TAGS[j] || tail2 === Q_TAGS[j]) return true;
+      if(last===Q_TAGS[j] || last3===Q_TAGS[j]) return true;
     }
   }
   return false;
 }
-
 function looksLikeExclamation(text){
-  var t = normalise_(text);
-  return EXCLAIM.indexOf(t) > -1;
+  return EXCLAIM.indexOf(normalise_(text))>-1;
 }
-
 function capitalise_(t){
-  if(!t) return t;
-  return t.charAt(0).toUpperCase() + t.slice(1);
+  return t ? t.charAt(0).toUpperCase()+t.slice(1) : t;
 }
-
-// Restore the accent on a leading interrogative so the text reads as real
-// Spanish. Only the first word, and only inside something we already decided
-// is a question.
 function fixLeadingAccent_(text){
-  var m = String(text).match(/^(\s*)([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)/);
-  if(!m) return text;
-  var lower = m[2].toLowerCase();
-  if(!Q_WORDS[lower] || Q_WORDS[lower] === lower) return text;
-  return m[1] + Q_WORDS[lower] + text.slice(m[0].length);
+  var w=words_(text);
+  if(!w.length) return text;
+  var lower=normalise_(w[0]);
+  var fixed=Q_STRONG[lower] || Q_WEAK[lower];
+  if(!fixed || fixed===lower) return text;
+  w[0]=fixed;
+  return w.join(' ');
 }
-
-// "esta bien verdad" reads much better to a listener - and to the model - as
-// "esta bien, verdad".
 function commaBeforeTag_(text){
-  var words = String(text).trim().split(/\s+/);
-  if(words.length < 3) return text;
-  var last = normalise_(words[words.length-1]);
-  if(Q_TAGS.indexOf(last) === -1) return text;
-  return words.slice(0,-1).join(' ') + ', ' + words[words.length-1];
+  var w=words_(text);
+  if(w.length<3) return text;
+  if(Q_TAGS.indexOf(normalise_(w[w.length-1]))===-1) return text;
+  return w.slice(0,-1).join(' ')+', '+w[w.length-1];
 }
 
 function punctuateSentence(text){
-  var t = String(text||'').trim().replace(/\s+/g,' ');
+  var t=trimEnds_(words_(text).join(' '));
   if(!t) return '';
-  t = t.replace(/[.!?¿¡]+$/,'').trim();
-  if(!t) return '';
-  if(looksLikeExclamation(t)) return '¡' + capitalise_(fixLeadingAccent_(t)) + '!';
-  if(looksLikeQuestion(t)) return '¿' + capitalise_(commaBeforeTag_(fixLeadingAccent_(t))) + '?';
-  return capitalise_(t) + '.';
+  if(looksLikeExclamation(t)) return '¡'+capitalise_(fixLeadingAccent_(t))+'!';
+  if(looksLikeQuestion(t)) return '¿'+capitalise_(commaBeforeTag_(fixLeadingAccent_(t)))+'?';
+  return capitalise_(t)+'.';
 }
 
-// chunks: [{text, at}] in the order the recogniser produced them.
+// chunks: [{text, at}] - one entry per final result from the recogniser.
 function punctuate(chunks){
-  var groups = [], current = [];
-  (chunks||[]).forEach(function(c, i){
-    var text = String(c && c.text || '').trim();
+  var groups=[];
+  (chunks||[]).forEach(function(c){
+    var text=String(c && c.text || '').trim();
     if(!text) return;
-    var gap = i === 0 ? Infinity : (Number(c.at) - Number(chunks[i-1].at));
-    if(current.length && gap >= SENTENCE_GAP_MS){ groups.push(current); current = []; }
-    current.push(text);
+    var first=normalise_(words_(text)[0]||'');
+    // A joining word never absorbs a chunk that is a question in its own
+    // right - otherwise "hola" + "que significa cobija" becomes one flat
+    // statement and the question mark is lost.
+    var standsAlone = looksLikeQuestion(text) || looksLikeExclamation(text);
+    if(groups.length && !standsAlone && CONTINUERS.indexOf(first)>-1){
+      var joiner=(COMMA_BEFORE.indexOf(first)>-1) ? ', ' : ' ';
+      groups[groups.length-1]+=joiner+text;
+    } else {
+      groups.push(text);
+    }
   });
-  if(current.length) groups.push(current);
-  return groups.map(function(g){ return punctuateSentence(g.join(' ')); })
-               .filter(Boolean).join(' ');
+  return groups.map(punctuateSentence).filter(Boolean).join(' ');
 }
 
 // ---------- the conversation clock ----------
@@ -426,6 +470,24 @@ function paintTalk(){
 }
 
 // ---------- microphone ----------
+// A short, low-confidence final is almost always room noise, the tutor's own
+// voice leaking back, or half a word clipped by a restart. Chrome reports
+// confidence 0 for some results, so only a real number is acted on.
+function acceptFinal(text, conf){
+  var w = words_(String(text||'').trim());
+  if(!w.length) return false;
+  if(typeof conf === 'number' && conf > 0 && conf < 0.35 && w.length <= 2) return false;
+  return true;
+}
+
+// The recogniser sometimes repeats a final it has already given us, and on a
+// speaker it can hear the tutor and hand back the same phrase twice.
+function isEcho(chunks, text, now){
+  var last = chunks && chunks.length ? chunks[chunks.length-1] : null;
+  if(!last) return false;
+  return normalise_(last.text) === normalise_(text) && (now - Number(last.at)) < 1500;
+}
+
 var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
 var rec=null, recWanted=false;
 function startRec(){
@@ -433,18 +495,26 @@ function startRec(){
   recWanted=true;
   rec=new SR(); rec.lang=profile.micLang||'es-MX'; rec.continuous=true; rec.interimResults=true;
   rec.onresult=function(e){
-    var fin='', inter='';
+    var inter='', heardAnything=false, now=Date.now();
     for(var i=e.resultIndex;i<e.results.length;i++){
-      if(e.results[i].isFinal) fin+=e.results[i][0].transcript;
-      else inter+=e.results[i][0].transcript;
+      var r=e.results[i];
+      var txt=String(r[0] && r[0].transcript || '').trim();
+      if(!txt) continue;
+      heardAnything=true;
+      if(!r.isFinal){ inter+=(inter?' ':'')+txt; continue; }
+      // Each final is one sentence as far as the recogniser is concerned, so
+      // it becomes its own chunk rather than being glued onto the last one.
+      if(!acceptFinal(txt, r[0].confidence)) continue;
+      if(isEcho(conv.chunks, txt, now)) continue;
+      conv.chunks.push({text:txt, at:now});
+      conv.heard += (conv.heard ? ' ' : '') + txt;
     }
-    if(fin || inter){
-      conv.lastVoiceAt=Date.now();
+    if(heardAnything){
+      conv.lastVoiceAt=now;
       // Only cut the tutor off by voice with headphones on. On a speaker the
       // mic hears the tutor itself and would interrupt on every single word.
       if(profile.handsFree && speaking()) cancelSpeak();
     }
-    if(fin){ conv.heard+=fin; conv.chunks.push({text:fin, at:Date.now()}); }
     conv.interim=(conv.heard+' '+inter).trim();
     paintTalk();
   };

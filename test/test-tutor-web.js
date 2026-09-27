@@ -643,12 +643,24 @@ test('59. The accent is restored on a leading interrogative', () => {
   eq(ctx.punctuate([{ text: 'cuando podemos regresar', at: 0 }]), '¿Cuándo podemos regresar?');
 });
 
-test('60. A long pause starts a new sentence, a short one does not', () => {
+test('60. One final result is one sentence; a joining word continues the last', () => {
   const { ctx } = world();
-  eq(ctx.punctuate([{ text: 'hola', at: 0 }, { text: 'como estas', at: 3000 }]),
-     'Hola. ¿Cómo estas?');
-  eq(ctx.punctuate([{ text: 'yo vivo en atlanta', at: 0 }, { text: 'con mi companero', at: 300 }]),
+  // Timing is no longer used at all - the timestamps below are identical and
+  // the grouping still comes out right.
+  eq(ctx.punctuate([{ text: 'yo vivo en atlanta', at: 0 }, { text: 'con mi companero', at: 0 }]),
      'Yo vivo en atlanta con mi companero.');
+  eq(ctx.punctuate([{ text: 'fui a la iglesia', at: 0 }, { text: 'pero llegue tarde', at: 0 }]),
+     'Fui a la iglesia, pero llegue tarde.');
+  eq(ctx.punctuate([{ text: 'hola', at: 0 }, { text: 'me llamo elder bundy', at: 0 }]),
+     'Hola. Me llamo elder bundy.');
+});
+
+test('60b. A joining word never swallows a question', () => {
+  const { ctx } = world();
+  // "que" joins clauses, but "que significa cobija" is a question in its own
+  // right and must not be glued onto the greeting before it.
+  eq(ctx.punctuate([{ text: 'hola', at: 0 }, { text: 'que significa cobija', at: 0 }]),
+     'Hola. ¿Qué significa cobija?');
 });
 
 test('61. A yes/no question opener is caught too', () => {
@@ -711,6 +723,52 @@ atest('68. The turn that actually reaches the model is the punctuated one', asyn
   const sent = JSON.parse(f.calls[0].init.body);
   const last = sent.messages[sent.messages.length - 1].content;
   eq(last, '¿Cómo esta usted?');
+});
+
+test('69. Words that are both question words and connectors are judged by what follows', () => {
+  const { ctx } = world();
+  // This was the main source of question marks landing at random.
+  eq(ctx.punctuate([{ text: 'como esta usted hoy', at: 0 }]), '¿Cómo esta usted hoy?');
+  eq(ctx.punctuate([{ text: 'como se dice blanket', at: 0 }]), '¿Cómo se dice blanket?');
+  eq(ctx.punctuate([{ text: 'como siempre llego tarde', at: 0 }]), 'Como siempre llego tarde.');
+  eq(ctx.punctuate([{ text: 'cuando era nino vivia alli', at: 0 }]), 'Cuando era nino vivia alli.');
+});
+
+test('70. "porque" is because, not "por que"', () => {
+  const { ctx } = world();
+  eq(ctx.punctuate([{ text: 'porque me gusta mucho', at: 0 }]), 'Porque me gusta mucho.');
+  eq(ctx.punctuate([{ text: 'por que me gusta', at: 0 }]), '¿Por que me gusta?');
+});
+
+test('71. A bare "no" on the end is no longer treated as a tag question', () => {
+  const { ctx } = world();
+  eq(ctx.punctuate([{ text: 'creo que no', at: 0 }]), 'Creo que no.');
+  eq(ctx.punctuate([{ text: 'esta bien verdad', at: 0 }]), '¿Esta bien, verdad?');
+});
+
+test('72. "esta bien" on its own is someone saying it is fine', () => {
+  const { ctx } = world();
+  eq(ctx.punctuate([{ text: 'esta bien', at: 0 }]), 'Esta bien.');
+  eq(ctx.punctuate([{ text: 'esta bien la comida', at: 0 }]), 'Esta bien la comida.');
+});
+
+test('73. Short low-confidence fragments are dropped as noise', () => {
+  const { ctx } = world();
+  eq(ctx.acceptFinal('eh', 0.2), false, 'a mumble should not become a turn');
+  eq(ctx.acceptFinal('si', 0.9), true, 'a confident short word is real');
+  eq(ctx.acceptFinal('no entiendo nada de eso', 0.2), true, 'a long phrase is kept even if unsure');
+  eq(ctx.acceptFinal('eh', 0), true, 'Chrome reports 0 when it has no score - do not guess');
+  eq(ctx.acceptFinal('   ', 0.9), false);
+});
+
+test('74. The same phrase coming straight back is treated as an echo', () => {
+  const { ctx } = world();
+  const chunks = [{ text: 'como estas', at: 1000 }];
+  eq(ctx.isEcho(chunks, 'como estas', 1400), true, 'the speaker hearing itself');
+  eq(ctx.isEcho(chunks, 'Como estas.', 1400), true, 'punctuation and case do not make it new');
+  eq(ctx.isEcho(chunks, 'como estas', 5000), false, 'saying it again later is deliberate');
+  eq(ctx.isEcho(chunks, 'muy bien', 1400), false);
+  eq(ctx.isEcho([], 'hola', 1000), false);
 });
 
 // ---------- report ----------
