@@ -624,6 +624,95 @@ test('56. A suppressed correction is still remembered quietly', () => {
   eq(ctx.profile.errors.length, 1, 'but still noted, so it can weave the right form in later');
 });
 
+test('57. A spoken question gets both Spanish question marks', () => {
+  const { ctx } = world();
+  eq(ctx.punctuate([{ text: 'como esta usted hoy', at: 0 }]), '¿Cómo esta usted hoy?');
+});
+
+test('58. A statement gets a full stop, not a question mark', () => {
+  const { ctx } = world();
+  eq(ctx.punctuate([{ text: 'me llamo elder bundy', at: 0 }]), 'Me llamo elder bundy.');
+});
+
+test('59. The accent is restored on a leading interrogative', () => {
+  const { ctx } = world();
+  // The recogniser drops accents, and they are inaudible, so putting them back
+  // cannot hide a mistake he actually made out loud.
+  eq(ctx.punctuate([{ text: 'que significa cobija', at: 0 }]), '¿Qué significa cobija?');
+  eq(ctx.punctuate([{ text: 'donde vive usted', at: 0 }]), '¿Dónde vive usted?');
+  eq(ctx.punctuate([{ text: 'cuando podemos regresar', at: 0 }]), '¿Cuándo podemos regresar?');
+});
+
+test('60. A long pause starts a new sentence, a short one does not', () => {
+  const { ctx } = world();
+  eq(ctx.punctuate([{ text: 'hola', at: 0 }, { text: 'como estas', at: 3000 }]),
+     'Hola. ¿Cómo estas?');
+  eq(ctx.punctuate([{ text: 'yo vivo en atlanta', at: 0 }, { text: 'con mi companero', at: 300 }]),
+     'Yo vivo en atlanta con mi companero.');
+});
+
+test('61. A yes/no question opener is caught too', () => {
+  const { ctx } = world();
+  eq(ctx.punctuate([{ text: 'puede repetir por favor', at: 0 }]), '¿Puede repetir por favor?');
+  eq(ctx.punctuate([{ text: 'tiene unos minutos', at: 0 }]), '¿Tiene unos minutos?');
+});
+
+test('62. A tag question gets its comma and its marks', () => {
+  const { ctx } = world();
+  eq(ctx.punctuate([{ text: 'esta bien verdad', at: 0 }]), '¿Esta bien, verdad?');
+});
+
+test('63. Common exclamations are not turned into questions', () => {
+  const { ctx } = world();
+  eq(ctx.punctuate([{ text: 'que padre', at: 0 }]), '¡Qué padre!');
+  eq(ctx.punctuate([{ text: 'que bueno', at: 0 }]), '¡Qué bueno!');
+});
+
+test('64. Statements that merely start with a verb are left alone', () => {
+  const { ctx } = world();
+  // Over-marking a statement as a question is worse than missing one, so the
+  // opener list is deliberately tight.
+  eq(ctx.punctuate([{ text: 'me gusta la comida', at: 0 }]), 'Me gusta la comida.');
+  eq(ctx.punctuate([{ text: 'vivo en georgia', at: 0 }]), 'Vivo en georgia.');
+  eq(ctx.punctuate([{ text: 'es un buen dia', at: 0 }]), 'Es un buen dia.');
+});
+
+test('65. Empty or blank audio produces nothing at all', () => {
+  const { ctx } = world();
+  eq(ctx.punctuate([]), '');
+  eq(ctx.punctuate([{ text: '   ', at: 0 }]), '');
+  eq(ctx.punctuate(null), '');
+});
+
+test('66. Punctuation the recogniser already supplied is not doubled up', () => {
+  const { ctx } = world();
+  eq(ctx.punctuate([{ text: 'hola.', at: 0 }]), 'Hola.');
+  eq(ctx.punctuate([{ text: 'como estas?', at: 0 }]), '¿Cómo estas?');
+});
+
+test('67. The model is told the punctuation is machine-added and not his', () => {
+  const { ctx } = world();
+  const p = ctx.systemPrompt(1, 'es');
+  assert(p.indexOf('ADDED BY A PROGRAM ON HIS PHONE') > -1);
+  assert(p.toLowerCase().indexOf('never correct his punctuation') > -1);
+});
+
+atest('68. The turn that actually reaches the model is the punctuated one', async () => {
+  // The engine being right is no use if the raw text is what gets sent.
+  const f = fetcher([reply(GOOD)]);
+  const { ctx } = world({ fetch: f });
+  ctx.conv.on = true;
+  ctx.conv.heard = 'como esta usted';
+  ctx.conv.chunks = [{ text: 'como esta usted', at: 0 }];
+  ctx.conv.lastVoiceAt = Date.now() - 999999;      // long since stopped talking
+  ctx.loop();
+  await new Promise(r => setImmediate(r));
+  eq(f.calls.length, 1, 'the clock should have sent the turn');
+  const sent = JSON.parse(f.calls[0].init.body);
+  const last = sent.messages[sent.messages.length - 1].content;
+  eq(last, '¿Cómo esta usted?');
+});
+
 // ---------- report ----------
 (async () => {
   for (const t of queue) {

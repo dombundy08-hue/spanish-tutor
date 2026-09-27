@@ -151,6 +151,15 @@
     stays live while the tutor talks so you can cut in by voice — but on a
     speaker it will hear itself and talk over you. With it off, tap the screen to
     interrupt instead.</p>
+  <label>Cómo te escucha el micrófono</label>
+  <select id="micLangSel">
+    <option value="es-MX">Español de México</option>
+    <option value="es-US">Español de Estados Unidos</option>
+    <option value="es-419">Español latinoamericano</option>
+    <option value="es-ES">Español de España</option>
+  </select>
+  <p class="note">If it keeps mishearing you, try another one — the recogniser is
+    tuned differently for each and one may fit your accent better.</p>
   <label>Nivel</label>
   <select id="lvlSel">
     <option value="1">1 — Solo presente, frases muy cortas</option>
@@ -213,7 +222,7 @@ var sessionTurns=0, lastHelpTurn=-99;
 
 // ---------- state ----------
 var DEFAULT={level:1,misses:[],errors:[],turnsAtLevel:0,checkpoints:[],
-             rate:0.8,voiceURI:'',silenceSec:2.5,idleSec:8,handsFree:false};
+             rate:0.8,voiceURI:'',silenceSec:2.5,idleSec:8,handsFree:false,micLang:'es-MX'};
 var profile=load('tutorProfile',DEFAULT);
 // The idle wait dropped from 10s to 8s (operator, 2026-09-26). Only move a
 // profile still sitting on the old default - a number he chose himself stays.
@@ -234,6 +243,127 @@ function save(){ try{ localStorage.setItem('tutorProfile',JSON.stringify(profile
 function getKey(){ try{ return localStorage.getItem('anthropicKey')||''; }catch(e){ return ''; } }
 function setKey(v){ try{ localStorage.setItem('anthropicKey',v); }catch(e){} }
 
+// ---------- punctuation, done here rather than by the model ----------
+//
+// The Web Speech API hands back a bare stream of words: "como esta usted hoy".
+// That costs the model context - it cannot tell a question from a statement,
+// or where one thought ends and the next begins. All of this is rule-based and
+// runs on the phone, so it costs nothing.
+//
+// Two signals are used. The recogniser marks a result final when it hears a
+// break, and we timestamp each one, so a long gap means a new sentence and a
+// short one means the same thought continued.
+
+var SENTENCE_GAP_MS = 900;
+
+// Interrogatives, with and without the accent - the recogniser routinely drops
+// accents, and they are inaudible anyway, so restoring them cannot hide a
+// mistake he actually made out loud.
+var Q_WORDS = {
+  'que':'qué', 'qué':'qué', 'quien':'quién', 'quién':'quién',
+  'quienes':'quiénes', 'quiénes':'quiénes', 'como':'cómo', 'cómo':'cómo',
+  'cuando':'cuándo', 'cuándo':'cuándo', 'donde':'dónde', 'dónde':'dónde',
+  'adonde':'adónde', 'adónde':'adónde', 'cual':'cuál', 'cuál':'cuál',
+  'cuales':'cuáles', 'cuáles':'cuáles', 'cuanto':'cuánto', 'cuánto':'cuánto',
+  'cuanta':'cuánta', 'cuantos':'cuántos', 'cuantas':'cuántas', 'porque':'por qué'
+};
+
+// Deliberately tight. A statement wrongly marked as a question is worse than a
+// question left as a statement, so only openers that are nearly always
+// questions are listed here.
+var Q_STARTERS = ['puedo','puede','puedes','podemos','pueden','podria','podría',
+  'podrias','podrías','quisiera','tiene','tienes','tienen','hay','quiere',
+  'quieres','quieren','sabe','sabes','saben','conoce','conoces','necesita',
+  'necesitas','te gusta','le gusta','les gusta','me puede','me puedes',
+  'nos puede','esta bien','está bien','verdad'];
+
+var Q_TAGS = ['verdad','no','cierto','si o no','sí o no','ok','okey'];
+
+var EXCLAIM = ['que bueno','qué bueno','que padre','qué padre','que chido',
+  'qué chido','que bonito','qué bonito','que rico','qué rico','que lastima',
+  'qué lástima','que pena','qué pena','que bien','qué bien','que gusto','qué gusto'];
+
+function normalise_(t){
+  return String(t||'').toLowerCase().replace(/[.,;:!?¿¡]/g,'').replace(/\s+/g,' ').trim();
+}
+
+function looksLikeQuestion(text){
+  var t = normalise_(text);
+  if(!t) return false;
+  var words = t.split(' ');
+  if(Q_WORDS[words[0]]) return true;
+  if(words.length > 1 && (words[0]+' '+words[1]) === 'por que') return true;
+  for(var i=0;i<Q_STARTERS.length;i++){
+    var st = Q_STARTERS[i];
+    if(t === st || t.indexOf(st+' ') === 0) return true;
+  }
+  // a tag on the end - "esta bien, verdad"
+  if(words.length >= 3){
+    var tail = words[words.length-1];
+    var tail2 = words.slice(-3).join(' ');
+    for(var j=0;j<Q_TAGS.length;j++){
+      if(tail === Q_TAGS[j] || tail2 === Q_TAGS[j]) return true;
+    }
+  }
+  return false;
+}
+
+function looksLikeExclamation(text){
+  var t = normalise_(text);
+  return EXCLAIM.indexOf(t) > -1;
+}
+
+function capitalise_(t){
+  if(!t) return t;
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+// Restore the accent on a leading interrogative so the text reads as real
+// Spanish. Only the first word, and only inside something we already decided
+// is a question.
+function fixLeadingAccent_(text){
+  var m = String(text).match(/^(\s*)([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)/);
+  if(!m) return text;
+  var lower = m[2].toLowerCase();
+  if(!Q_WORDS[lower] || Q_WORDS[lower] === lower) return text;
+  return m[1] + Q_WORDS[lower] + text.slice(m[0].length);
+}
+
+// "esta bien verdad" reads much better to a listener - and to the model - as
+// "esta bien, verdad".
+function commaBeforeTag_(text){
+  var words = String(text).trim().split(/\s+/);
+  if(words.length < 3) return text;
+  var last = normalise_(words[words.length-1]);
+  if(Q_TAGS.indexOf(last) === -1) return text;
+  return words.slice(0,-1).join(' ') + ', ' + words[words.length-1];
+}
+
+function punctuateSentence(text){
+  var t = String(text||'').trim().replace(/\s+/g,' ');
+  if(!t) return '';
+  t = t.replace(/[.!?¿¡]+$/,'').trim();
+  if(!t) return '';
+  if(looksLikeExclamation(t)) return '¡' + capitalise_(fixLeadingAccent_(t)) + '!';
+  if(looksLikeQuestion(t)) return '¿' + capitalise_(commaBeforeTag_(fixLeadingAccent_(t))) + '?';
+  return capitalise_(t) + '.';
+}
+
+// chunks: [{text, at}] in the order the recogniser produced them.
+function punctuate(chunks){
+  var groups = [], current = [];
+  (chunks||[]).forEach(function(c, i){
+    var text = String(c && c.text || '').trim();
+    if(!text) return;
+    var gap = i === 0 ? Infinity : (Number(c.at) - Number(chunks[i-1].at));
+    if(current.length && gap >= SENTENCE_GAP_MS){ groups.push(current); current = []; }
+    current.push(text);
+  });
+  if(current.length) groups.push(current);
+  return groups.map(function(g){ return punctuateSentence(g.join(' ')); })
+               .filter(Boolean).join(' ');
+}
+
 // ---------- the conversation clock ----------
 // Pulled out as a pure function because the whole feel of the thing lives here
 // and timers are miserable to test any other way.
@@ -248,7 +378,7 @@ function decide(o){
   return 'wait';
 }
 
-var conv={on:false, heard:'', lastVoiceAt:0, tick:null, interim:''};
+var conv={on:false, heard:'', chunks:[], lastVoiceAt:0, tick:null, interim:''};
 function silenceMs(){ return Math.round((Number(profile.silenceSec)||2.5)*1000); }
 function idleMs(){ return Math.round((Number(profile.idleSec)||10)*1000); }
 function speaking(){ try{ return !!(window.speechSynthesis && speechSynthesis.speaking); }catch(e){ return false; } }
@@ -256,7 +386,7 @@ function speaking(){ try{ return !!(window.speechSynthesis && speechSynthesis.sp
 function convStart(){
   if(!SR){ addError('Este navegador no permite el micrófono. Usa el teclado.'); return; }
   if(!getKey()){ showSetup(); return; }
-  conv.on=true; conv.heard=''; conv.interim=''; conv.lastVoiceAt=Date.now();
+  conv.on=true; conv.heard=''; conv.chunks=[]; conv.interim=''; conv.lastVoiceAt=Date.now();
   startRec(); if(!conv.tick) conv.tick=setInterval(loop,300);
   paintTalk();
   if(!convo.length) send('', 'es');     // opening greeting
@@ -272,7 +402,9 @@ function loop(){
                   silenceMs:silenceMs(), idleMs:idleMs(),
                   speaking:speaking(), thinking:busy});
   if(act==='send'){
-    var t=conv.heard.trim(); conv.heard=''; conv.interim=''; conv.lastVoiceAt=Date.now();
+    var raw=conv.heard.trim();
+    var t=punctuate(conv.chunks) || raw;      // never lose a turn to the punctuator
+    conv.heard=''; conv.chunks=[]; conv.interim=''; conv.lastVoiceAt=Date.now();
     send(t,'es');
   } else if(act==='nudge'){
     conv.lastVoiceAt=Date.now();
@@ -299,7 +431,7 @@ var rec=null, recWanted=false;
 function startRec(){
   if(!SR || rec) return;
   recWanted=true;
-  rec=new SR(); rec.lang='es-MX'; rec.continuous=true; rec.interimResults=true;
+  rec=new SR(); rec.lang=profile.micLang||'es-MX'; rec.continuous=true; rec.interimResults=true;
   rec.onresult=function(e){
     var fin='', inter='';
     for(var i=e.resultIndex;i<e.results.length;i++){
@@ -312,7 +444,7 @@ function startRec(){
       // mic hears the tutor itself and would interrupt on every single word.
       if(profile.handsFree && speaking()) cancelSpeak();
     }
-    if(fin) conv.heard+=fin;
+    if(fin){ conv.heard+=fin; conv.chunks.push({text:fin, at:Date.now()}); }
     conv.interim=(conv.heard+' '+inter).trim();
     paintTalk();
   };
@@ -521,6 +653,8 @@ function systemPrompt(level,mode){
   p.push('PACE - he freezes up when rushed:');
   p.push('One question per turn. Never stack two. Keep your turn shorter than his. If he says something very short, take it and build on it rather than asking him to say more.');
   p.push('');
+  p.push('THE PUNCTUATION IN HIS TURNS WAS ADDED BY A PROGRAM ON HIS PHONE, not by him - he is speaking, not typing. It guesses, and it is often wrong. Never correct his punctuation, never comment on it, and never count it as a mistake.');
+  p.push('');
   p.push('HIS SPEECH COMES FROM A PHONE MICROPHONE, so it arrives with no punctuation, sometimes cut off mid-thought, and sometimes mis-heard. Read through the noise instead of correcting it as though he said it wrong. If a turn looks like half a sentence, answer the part you understood. Never correct a mistake you are not sure he actually made.');
   p.push('');
   if(misses.length) p.push('WORDS HE HAS ALREADY MET (reuse them naturally so they stick): '+misses.join(', '));
@@ -696,6 +830,10 @@ document.getElementById('sil').oninput=function(){ profile.silenceSec=Number(thi
 document.getElementById('idle').oninput=function(){ profile.idleSec=Number(this.value); save();
   document.getElementById('idleVal').textContent=profile.idleSec; };
 document.getElementById('hf').onchange=function(){ profile.handsFree=!!this.checked; save(); };
+document.getElementById('micLangSel').onchange=function(){
+  profile.micLang=this.value; save();
+  if(conv.on){ stopRec(); startRec(); }     // take effect on the next word
+};
 document.getElementById('lvlSel').onchange=function(){ profile.level=Number(this.value);
   profile.turnsAtLevel=0; pendingCheckpoint=''; save(); paintLevel(); };
 document.getElementById('bTest').onclick=function(){ speak('Hola, élder. Soy tu compañero de español. Vamos a platicar despacio.'); };
@@ -738,6 +876,7 @@ document.getElementById('silVal').textContent=profile.silenceSec;
 document.getElementById('idle').value=profile.idleSec;
 document.getElementById('idleVal').textContent=profile.idleSec;
 document.getElementById('hf').checked=!!profile.handsFree;
+document.getElementById('micLangSel').value=profile.micLang||'es-MX';
 paintLevel(); paintTalk();
 if(!getKey()) showSetup();
 </script>

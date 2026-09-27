@@ -28,6 +28,12 @@ One HTML file, no build step, no server, no account.
   spoken in its own accent, so the English never comes out Spanish-flavoured.
 - **If you dry up, it carries the conversation** — offering two answers to pick
   from, asking something easier, or starting a sentence for you to finish.
+- **Your speech gets punctuated before it is sent.** The Web Speech API returns
+  a bare run of words — *"como esta usted hoy"* — which gives the model no way to
+  tell a question from a statement. A rule-based pass on the phone turns that
+  into *"¿Cómo esta usted hoy?"*: both Spanish question marks, the accent put
+  back on the interrogative, and a sentence break wherever you paused for more
+  than about a second. It costs nothing and uses no tokens.
 
 Both timings are adjustable in settings: how long it waits after you stop
 talking (default 2.5s) and how long before it fills a silence (default 8s).
@@ -73,11 +79,11 @@ ever moves **one step at a time**, whatever the model asks for.
 node test/test-tutor-web.js
 ```
 
-58 tests, no network and no browser: the harness pulls the `<script>` block out
+70 tests, no network and no browser: the harness pulls the `<script>` block out
 of `index.html` and runs it against a small fake DOM. They cover reply parsing
 (including malformed replies), the level ladder, the retry policy, the
-conversation clock that decides when to send and when to fill a silence, and
-that the API key never reaches a URL.
+conversation clock that decides when to send and when to fill a silence, the
+punctuation engine, and that the API key never reaches a URL.
 
 ## Why not Google Apps Script
 
