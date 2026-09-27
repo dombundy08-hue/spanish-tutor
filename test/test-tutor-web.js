@@ -531,13 +531,17 @@ test('47. The written version of the clarification has the tags stripped out', (
   eq(ctx.stripTags('[es]Casi.[/es] [en]Use estar.[/en]'), 'Casi. Use estar.');
 });
 
-test('48. The prompt only allows a clarification when he asks or makes a mistake', () => {
+test('48. The prompt makes silence the normal case, not correcting', () => {
   const { ctx } = world();
   const p = ctx.systemPrompt(1, 'es');
   assert(p.indexOf('LEAVE THIS COMPLETELY EMPTY') > -1, 'must default to saying nothing');
-  assert(p.toLowerCase().indexOf('he asked for help') > -1, 'trigger (a) missing');
-  assert(p.toLowerCase().indexOf('mistake worth fixing') > -1, 'trigger (b) missing');
-  assert(p.toLowerCase().indexOf('do not teach unprompted') > -1, 'must not lecture him unasked');
+  assert(p.indexOf('Silence is the normal case') > -1, 'restraint must be the stated default');
+  assert(p.indexOf('BEING A BEGINNER IS NOT A MISTAKE') > -1, 'must tell it to let beginner errors go');
+  assert(p.toLowerCase().indexOf('not a teacher marking his work') > -1, 'must set the role');
+  assert(p.indexOf('Just say hello') > -1, 'the opening should be a greeting, not a lesson');
+  assert(p.toLowerCase().indexOf('when he is stuck') > -1, 'must say how to carry him when he dries up');
+  assert(p.indexOf('NOT a list to correct him on') === -1 || p.indexOf('background') > -1,
+         'remembered errors must not read as a to-do list');
 });
 
 test('49. The prompt teaches the code-switching and how to tag it', () => {
@@ -564,6 +568,60 @@ test('51. Only a real mistake is remembered, not every explanation', () => {
   ctx.onReply({ es: 'a', en: '[en]Use estar.[/en]', meta: { level: 1, error_note: 'ser instead of estar' } });
   eq(ctx.profile.errors.length, 1);
   eq(ctx.profile.errors[0], 'ser instead of estar');
+});
+
+test('52. It does not correct him in the opening turns of a conversation', () => {
+  const { ctx } = world();
+  const help = '[en]You meant estar.[/en]';
+  for (let i = 0; i < ctx.HELP_GRACE; i++) {
+    const r = { es: 'hola', en: help, meta: { level: 1 } };
+    ctx.onReply(r);
+    eq(r.en, '', 'turn ' + (i + 1) + ' should have let it go');
+  }
+});
+
+test('53. After the grace period it corrects once, then goes quiet again', () => {
+  const { ctx } = world();
+  const help = '[en]You meant estar.[/en]';
+  const kept = [];
+  for (let i = 0; i < 12; i++) {
+    const r = { es: 'hola', en: help, meta: { level: 1 } };
+    ctx.onReply(r);
+    if (r.en) kept.push(i + 1);
+  }
+  assert(kept.length <= 3, 'corrected ' + kept.length + ' times in 12 turns: ' + kept.join(','));
+  assert(kept.length >= 1, 'it should still correct sometimes');
+  for (let i = 1; i < kept.length; i++) {
+    assert(kept[i] - kept[i - 1] >= ctx.HELP_COOLDOWN,
+      'corrections only ' + (kept[i] - kept[i - 1]) + ' turns apart');
+  }
+});
+
+test('54. Asking for help always gets through, cooldown or not', () => {
+  const { ctx } = world();
+  const help = '[es]Cobija[/es] [en]means blanket.[/en]';
+  for (let i = 0; i < 6; i++) {
+    const r = { es: 'hola', en: help, meta: { level: 1, asked: true } };
+    ctx.onReply(r);
+    eq(r.en, help, 'turn ' + (i + 1) + ' - he asked, so it must answer');
+  }
+});
+
+test('55. Tapping the English button also always gets through', () => {
+  const { ctx } = world();
+  const help = '[en]Here is what that meant.[/en]';
+  const r = { es: 'hola', en: help, meta: { level: 1 } };
+  ctx.onReply(r, 'en');
+  eq(r.en, help, 'an explicit request must never be swallowed by the budget');
+});
+
+test('56. A suppressed correction is still remembered quietly', () => {
+  const { ctx } = world();
+  ctx.profile.errors = [];
+  const r = { es: 'hola', en: '[en]estar[/en]', meta: { level: 1, error_note: 'ser instead of estar' } };
+  ctx.onReply(r);
+  eq(r.en, '', 'not said out loud during the grace period');
+  eq(ctx.profile.errors.length, 1, 'but still noted, so it can weave the right form in later');
 });
 
 // ---------- report ----------

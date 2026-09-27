@@ -16,12 +16,18 @@ One HTML file, no build step, no server, no account.
 - **The Spanish text starts hidden** so your ear does the work. One tap reveals it.
 - **Speed it up or slow it down** mid-conversation with the 🐇 / 🐢 buttons.
 - **It corrects you gently**, after it has answered, one thing per turn.
-- **It only explains when you ask or when you slip.** No unprompted lessons, no
-  explaining things you got right.
+- **It hardly ever corrects you.** Being a beginner is not a mistake, and it is
+  told to let wrong genders, missing accents, odd word order and the rest go by
+  without comment. Corrections are also rationed in code: none in the first
+  three turns, and at most one every five after that.
+- **Asking for help always gets through** — that rationing never applies when
+  you ask what something means or say you did not understand.
 - **When it does explain, it moves between the two languages** the way a
   bilingual friend does across a table — *"Casi. Dijiste 'yo soy bien'. For
   feelings Spanish uses estar. Se dice 'yo estoy bien'."* — and each stretch is
   spoken in its own accent, so the English never comes out Spanish-flavoured.
+- **If you dry up, it carries the conversation** — offering two answers to pick
+  from, asking something easier, or starting a sentence for you to finish.
 
 Both timings are adjustable in settings: how long it waits after you stop
 talking (default 2.5s) and how long before it fills a silence (default 8s).
@@ -67,7 +73,7 @@ ever moves **one step at a time**, whatever the model asks for.
 node test/test-tutor-web.js
 ```
 
-53 tests, no network and no browser: the harness pulls the `<script>` block out
+58 tests, no network and no browser: the harness pulls the `<script>` block out
 of `index.html` and runs it against a small fake DOM. They cover reply parsing
 (including malformed replies), the level ladder, the retry policy, the
 conversation clock that decides when to send and when to fill a silence, and

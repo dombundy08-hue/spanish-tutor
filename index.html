@@ -202,6 +202,15 @@ var MODEL='claude-sonnet-5';
 var DAILY_CAP=400;
 var NUDGE='(silencio)';        // sent when he has said nothing for a while
 
+// He told me it was correcting him nonstop and he could not get through a
+// conversation. For a brand-new speaker "correct every mistake" means correct
+// every single turn, so the budget is enforced here rather than left to the
+// prompt: no unprompted correction in the first few turns, and a long gap
+// between them afterwards. Asking for help always gets through.
+var HELP_GRACE=3;      // turns at the start with no unprompted correction
+var HELP_COOLDOWN=5;   // turns between unprompted corrections
+var sessionTurns=0, lastHelpTurn=-99;
+
 // ---------- state ----------
 var DEFAULT={level:1,misses:[],errors:[],turnsAtLevel:0,checkpoints:[],
              rate:0.8,voiceURI:'',silenceSec:2.5,idleSec:8,handsFree:false};
@@ -473,28 +482,38 @@ function systemPrompt(level,mode){
   p.push(D_ES);
   p.push('Your side of the conversation, in Spanish. Just talk to him.');
   p.push(D_HELP);
-  p.push('A short clarification. LEAVE THIS COMPLETELY EMPTY unless one of these two things is true:');
-  p.push('  (a) he asked for help - he said he does not understand, asked what something means, asked in English, or asked you to repeat; or');
-  p.push('  (b) he made a Spanish mistake worth fixing - wrong verb, wrong gender, wrong tense, a word that does not mean what he thinks.');
-  p.push('If neither is true, leave it empty and just keep talking. Do not explain things he got right. Do not teach unprompted.');
+  p.push('Almost always LEAVE THIS COMPLETELY EMPTY. Silence is the normal case, not the exception.');
+  p.push('Fill it only when one of these is true:');
+  p.push('  (a) he asked - he said he does not understand, asked what something means, asked you to repeat, or asked in English; or');
+  p.push('  (b) he said something a Spanish speaker genuinely would not understand, or that means something quite different from what he meant.');
   p.push('');
-  p.push('WHEN YOU DO FILL IT, SWITCH BACK AND FORTH BETWEEN THE TWO LANGUAGES, the way a bilingual friend explains something across a table. Mark every stretch with [es] or [en] so each one is spoken in the right accent. Keep the whole thing to a few seconds.');
+  p.push('BEING A BEGINNER IS NOT A MISTAKE. Wrong gender on an article, a missing accent, odd word order, a dropped pronoun, the wrong tense where the meaning is still obvious, a word borrowed from English - let ALL of it go without a word. A friend would not mention any of it, and he has told me he cannot get through a conversation for being corrected. If you are even slightly unsure whether to say something, do not.');
+  p.push('You are a friend he is talking to, not a teacher marking his work. Getting through a real conversation is worth far more to him than any single correction.');
+  p.push('');
+  p.push('WHEN YOU DO FILL IT, SWITCH BACK AND FORTH BETWEEN THE TWO LANGUAGES, the way a bilingual friend explains something across a table. Mark every stretch with [es] or [en] so each one is spoken in the right accent. Keep the whole thing to a few seconds, then get straight back to talking.');
   p.push('Example of a correction:');
-  p.push('[es]Casi. Dijiste "yo soy bien".[/es] [en]For how you feel, Spanish uses estar, not ser.[/en] [es]Se dice "yo estoy bien". Otra vez, ¿cómo estás?[/es]');
+  p.push('[es]Casi. Dijiste "yo soy bien".[/es] [en]For how you feel, Spanish uses estar, not ser.[/en] [es]Se dice "yo estoy bien". Y tú, ¿cómo estás hoy?[/es]');
   p.push('Example of him asking what a word means:');
   p.push('[es]"Cobija" es esto que usas en la cama.[/es] [en]A blanket.[/en] [es]¿Tienes una cobija en tu cuarto?[/es]');
-  p.push('Lead with Spanish where you can, drop into English only for the part that actually needs it, and come back out into Spanish. Never write a whole paragraph in English unless he specifically asked you to explain in English.');
+  p.push('Lead with Spanish, drop into English only for the part that actually needs it, and come back out into Spanish. Never write a whole paragraph in English unless he asked you to explain in English.');
   p.push('');
   p.push(D_META);
-  p.push('{"new_words":[],"error_note":"","level":'+level+',"checkpoint":"","passed":false}');
+  p.push('{"new_words":[],"asked":false,"error_note":"","level":'+level+',"checkpoint":"","passed":false}');
+  p.push('- asked: true only when the clarification is answering something HE asked for. False when you decided to correct him.');
   p.push('- new_words: up to three Spanish words from YOUR reply he probably does not know. Bare words, no articles, no translation.');
   p.push('- error_note: three to eight words naming the mistake he actually made, e.g. "ser instead of estar for feelings". Empty unless he really made one - asking what a word means is not a mistake. This is only used to remember what he keeps getting wrong.');
   p.push('- level: what level he should be on after this turn. Move one step at a time, and only with real evidence.');
   p.push('- checkpoint: when he seems ready to move up, a short challenge IN SPANISH he must complete to prove it. Empty otherwise.');
   p.push('- passed: true only on the turn where he clearly completed a checkpoint you set.');
   p.push('');
-  p.push('HOW TO CORRECT HIM:');
-  p.push('Answer what he said first, like a friend would. The correction goes in the clarification block afterwards, never in the middle of the conversation. One thing per turn - the single mistake most worth fixing. Let the small stuff go. Never make him feel stupid, and never correct something he got right.');
+  p.push('HOW TO CORRECT HIM, ON THE RARE OCCASIONS YOU DO:');
+  p.push('Answer what he said first, like a friend would, and keep the conversation going. The correction goes in the clarification block afterwards, never in the middle. One thing only - the single mistake that actually got in the way. Never make him feel stupid, and never correct something he got right.');
+  p.push('');
+  p.push('HOW TO OPEN:');
+  p.push('Just say hello and ask him one easy thing, the way you would greet a friend. Do not announce a topic, do not set up an exercise, do not explain what you are going to do. Say hola and start talking.');
+  p.push('');
+  p.push('WHEN HE IS STUCK:');
+  p.push('If he goes quiet, gives you a one-word answer, or clearly does not know what to say, carry it for him. Offer him two answers to choose between, ask something easier, start a sentence for him to finish, or just tell him something about your own day so he has something to react to. Never leave him staring at a hard question.');
   p.push('');
   p.push('WHEN HIS TURN IS EXACTLY "'+NUDGE+'":');
   p.push('He said nothing for a while. Do NOT treat it as something he said, and never read it out. He may be thinking, or stuck. Carry the conversation yourself: ask again in easier words, offer him two answers to pick from, or start a sentence for him to finish. Short and warm. Never mention that he was quiet.');
@@ -505,7 +524,7 @@ function systemPrompt(level,mode){
   p.push('HIS SPEECH COMES FROM A PHONE MICROPHONE, so it arrives with no punctuation, sometimes cut off mid-thought, and sometimes mis-heard. Read through the noise instead of correcting it as though he said it wrong. If a turn looks like half a sentence, answer the part you understood. Never correct a mistake you are not sure he actually made.');
   p.push('');
   if(misses.length) p.push('WORDS HE HAS ALREADY MET (reuse them naturally so they stick): '+misses.join(', '));
-  if(errors.length) p.push('MISTAKES HE REPEATS (watch for these): '+errors.join(' | '));
+  if(errors.length) p.push('THINGS HE HAS GOT WRONG BEFORE. This is background so you can weave the right form into your own speech naturally. It is NOT a list to correct him on: '+errors.join(' | '));
   p.push('He has taken '+turns+' turns at level '+level+' and passed '+passed+' checkpoint(s).');
   if(turns>=12&&level<5) p.push('He has been at this level a while. If he is handling it, set a checkpoint.');
   if(mode==='en') p.push('HE HAS JUST ASKED FOR ENGLISH, so the clarification block is required this turn. Explain in English, but still wrap the Spanish bits in [es] and the English bits in [en], and finish in Spanish.');
@@ -556,7 +575,7 @@ function send(override,mode){
   if(msgs[0].role!=='user') msgs.unshift({role:'user',content:'(Empezamos.)'});
 
   ask(systemPrompt(profile.level,mode),msgs).then(function(raw){
-    bumpCap(); onReply(parseReply(raw));
+    bumpCap(); onReply(parseReply(raw), mode);
   }).catch(function(err){
     busy=false; conv.lastVoiceAt=Date.now(); paintTalk();
     addError(String(err&&err.message?err.message:err));
@@ -604,8 +623,15 @@ function ask(system,messages){
   return go();
 }
 
-function onReply(res){
+function onReply(res, mode){
   busy=false;
+  var m0=res.meta||{};
+  sessionTurns++;
+  // He asked for it, either by tapping the button or by saying so out loud.
+  var asked = !!m0.asked || mode==='en';
+  var due = (sessionTurns > HELP_GRACE) && (sessionTurns - lastHelpTurn >= HELP_COOLDOWN);
+  if(res.en && (asked || due)) lastHelpTurn=sessionTurns;
+  else res.en='';   // let it go; the conversation matters more than the lesson
   addTutor(res); convo.push({role:'tutor',text:res.es});
   var m=res.meta||{};
   profile.turnsAtLevel=(profile.turnsAtLevel||0)+1;
