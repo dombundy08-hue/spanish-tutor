@@ -109,8 +109,8 @@ const reply = text => ({ status: 200, body: { content: [{ type: 'text', text }] 
 
 const GOOD = [
   '<<<ES>>>', 'Hola, élder. ¿Cómo está usted?',
-  '<<<EN>>>', 'I asked how you are.',
-  '<<<META>>>', '{"correction":"yo soy bien -> yo estoy bien","new_words":["hoy"],"level":1,"checkpoint":"","passed":false}'
+  '<<<AYUDA>>>', '[es]Casi.[/es] [en]Use estar for feelings.[/en] [es]Yo estoy bien.[/es]',
+  '<<<META>>>', '{"new_words":["hoy"],"error_note":"ser instead of estar","level":1,"checkpoint":"","passed":false}'
 ].join('\n');
 
 // ---------- runner ----------
@@ -131,7 +131,8 @@ test('1. A three-block reply splits into Spanish, English and meta', () => {
   const { ctx } = world();
   const r = ctx.parseReply(GOOD);
   eq(r.es, 'Hola, élder. ¿Cómo está usted?');
-  eq(r.en, 'I asked how you are.');
+  assert(r.en.indexOf('[en]') > -1, 'the clarification keeps its language tags');
+  eq(r.meta.error_note, 'ser instead of estar');
   eq(r.meta.new_words[0], 'hoy');
 });
 
@@ -149,9 +150,9 @@ test('3. Broken JSON in the meta block degrades to empty instead of throwing', (
   eq(Object.keys(r.meta).length, 0);
 });
 
-test('4. An empty English block does not leak the META marker into it', () => {
+test('4. An empty clarification block does not leak the META marker into it', () => {
   const { ctx } = world();
-  eq(ctx.parseReply('<<<ES>>>\nHola\n<<<EN>>>\n\n<<<META>>>\n{}').en, '');
+  eq(ctx.parseReply('<<<ES>>>\nHola\n<<<AYUDA>>>\n\n<<<META>>>\n{}').en, '');
 });
 
 // ---------- the prompt ----------
@@ -161,7 +162,7 @@ test('5. The prompt carries level rules, missed words and repeated errors', () =
   ctx.profile.misses = ['sartén', 'cobija'];
   ctx.profile.errors = ['ser vs estar'];
   const s = ctx.systemPrompt(3, 'es');
-  assert(s.indexOf('preterite') > -1, 'level 3 rules missing');
+  assert(s.toLowerCase().indexOf('preterite') > -1, 'level 3 description missing');
   assert(s.indexOf('sartén') > -1, 'missed words missing');
   assert(s.indexOf('ser vs estar') > -1, 'repeat errors missing');
   assert(s.indexOf('ustedes') > -1, 'should pin Latin American Spanish');
@@ -207,7 +208,7 @@ test('10. New words are collected without duplicates', () => {
 test('11. The word and error lists are capped so the prompt cannot grow forever', () => {
   const { ctx } = world();
   ctx.profile.misses = []; ctx.profile.errors = [];
-  for (let i = 0; i < 200; i++) ctx.onReply({ es: 'a', en: '', meta: { new_words: ['w' + i], correction: 'e' + i } });
+  for (let i = 0; i < 200; i++) ctx.onReply({ es: 'a', en: '', meta: { new_words: ['w' + i], error_note: 'e' + i } });
   assert(ctx.profile.misses.length <= 120, 'misses grew to ' + ctx.profile.misses.length);
   assert(ctx.profile.errors.length <= 60, 'errors grew to ' + ctx.profile.errors.length);
 });
@@ -402,7 +403,7 @@ test('32. The silence marker is explained to the model and never read aloud', ()
   const s = ctx.systemPrompt(1, 'es');
   assert(s.indexOf(ctx.NUDGE) > -1, 'the marker itself must appear in the prompt');
   assert(s.toLowerCase().indexOf('never read it out') > -1, 'must tell it not to speak the marker');
-  assert(s.toLowerCase().indexOf('spoken conversation') > -1, 'must say this is speech, not text');
+  assert(s.toLowerCase().indexOf('spoken out loud') > -1, 'must say this is speech, not text');
 });
 
 test('33. The idle wait defaults to 8 seconds', () => {
@@ -450,70 +451,119 @@ test('38. Slower still works and stops at the minimum', () => {
   eq(Number(ctx.profile.rate.toFixed(2)), 0.5);
 });
 
-test('39. When he is lost, the English is spoken too - English first', () => {
+test('39. The Spanish answer comes first, then the clarification', () => {
   const { ctx, env } = world();
   env.speechSynthesis.spoken.length = 0;
-  ctx.speakReply({ es: 'Vamos otra vez. ¿Cómo está?', en: 'I asked how you are doing.' });
-  const said = env.speechSynthesis.spoken;
-  eq(said.length, 2, 'both halves should be read aloud');
-  eq(said[0].text, 'I asked how you are doing.', 'the explanation comes first');
-  eq(said[1].text, 'Vamos otra vez. ¿Cómo está?', 'then the easier Spanish retry');
+  ctx.speakReply({ es: 'Muy bien. ¿Y tu compañero?',
+                   en: '[es]Casi.[/es] [en]Use estar for feelings.[/en] [es]Yo estoy bien.[/es]' });
+  const said = env.speechSynthesis.spoken.map(x => x.text);
+  eq(said.length, 4, 'reply plus three switched stretches');
+  eq(said[0], 'Muy bien. ¿Y tu compañero?', 'he answers the conversation first');
+  eq(said[1], 'Casi.');
+  eq(said[2], 'Use estar for feelings.');
+  eq(said[3], 'Yo estoy bien.');
 });
 
-test('40. The English half is spoken with an English voice, not the Spanish one', () => {
+test('40. Each stretch is spoken in its own language, not one accent throughout', () => {
   const { ctx, env } = world();
   env.speechSynthesis.spoken.length = 0;
-  ctx.speakReply({ es: 'Hola', en: 'Hello there.' });
-  assert(/^en/i.test(env.speechSynthesis.spoken[0].lang), 'got ' + env.speechSynthesis.spoken[0].lang);
-  assert(/^es/i.test(env.speechSynthesis.spoken[1].lang), 'got ' + env.speechSynthesis.spoken[1].lang);
+  ctx.speakReply({ es: 'Hola', en: '[es]Dijiste mal.[/es] [en]It should be estar.[/en] [es]Otra vez.[/es]' });
+  const langs = env.speechSynthesis.spoken.map(x => x.lang.slice(0, 2).toLowerCase());
+  eq(langs.join(','), 'es,es,en,es', 'a Spanish voice reading English is useless');
 });
 
 test('41. English is read at native speed even when Spanish is slowed right down', () => {
   const { ctx, env } = world();
   ctx.profile.rate = 0.5;
   env.speechSynthesis.spoken.length = 0;
-  ctx.speakReply({ es: 'Hola', en: 'Hello there.' });
-  eq(env.speechSynthesis.spoken[0].rate, 1.0, 'English should not crawl - it is his own language');
-  eq(env.speechSynthesis.spoken[1].rate, 0.5, 'Spanish keeps his chosen rate');
+  ctx.speakReply({ es: 'Hola', en: '[en]It should be estar.[/en]' });
+  eq(env.speechSynthesis.spoken[0].rate, 0.5, 'Spanish keeps his chosen rate');
+  eq(env.speechSynthesis.spoken[1].rate, 1.0, 'English should not crawl - it is his own language');
 });
 
-test('42. An ordinary reply with no English says only the Spanish', () => {
+test('42. An ordinary reply with no clarification says only the Spanish', () => {
   const { ctx, env } = world();
   env.speechSynthesis.spoken.length = 0;
   ctx.speakReply({ es: 'Muy bien, élder.', en: '' });
-  eq(env.speechSynthesis.spoken.length, 1);
-  assert(/^es/i.test(env.speechSynthesis.spoken[0].lang));
+  eq(env.speechSynthesis.spoken.length, 1, 'it must not explain things he got right');
 });
 
-test('43. Interrupting during the English does not let the Spanish follow it', () => {
-  // The bug this guards: cancel() drops the queued half, but a naive chain
-  // would fire onend and start speaking the next part anyway.
+test('43. Interrupting stops the whole thing, it does not skip to the next stretch', () => {
+  // cancel() drops the queue, but a naive chain would fire onend and carry on.
   const { ctx, env } = world();
   env.speechSynthesis.autoEnd = false;
   env.speechSynthesis.spoken.length = 0;
-  ctx.speakReply({ es: 'Segunda parte', en: 'First part' });
-  eq(env.speechSynthesis.spoken.length, 1, 'only the first part should have started');
-  // Hold the utterance BEFORE cancelling - cancel() discards the queue, and a
-  // test that reads it afterwards proves nothing at all.
+  ctx.speakReply({ es: 'Primera', en: '[en]Second[/en]' });
+  eq(env.speechSynthesis.spoken.length, 1, 'only the first stretch should have started');
   const u = env.speechSynthesis.pending[0];
   assert(u && u.onend, 'the in-flight utterance should carry an onend handler');
   ctx.cancelSpeak();
-  u.onend();                              // a real browser fires this on cancel
-  eq(env.speechSynthesis.spoken.length, 1, 'the Spanish must not start after a cancel');
+  u.onend();
+  eq(env.speechSynthesis.spoken.length, 1, 'nothing may start after a cancel');
 });
 
-test('44. Repeat replays both halves, not just the Spanish', () => {
+test('44. Repeat replays the whole thing, clarification included', () => {
   const { ctx, env } = world();
-  ctx.speakReply({ es: 'Hola', en: 'Hello.' });
+  ctx.speakReply({ es: 'Hola', en: '[en]Hello.[/en]' });
   env.speechSynthesis.spoken.length = 0;
   ctx.replayLast();
   eq(env.speechSynthesis.spoken.length, 2);
-  eq(env.speechSynthesis.spoken[0].text, 'Hello.');
 });
 
-test('45. The prompt warns that the English block is spoken aloud', () => {
+test('45. Untagged help is treated as Spanish rather than read in an English voice', () => {
   const { ctx } = world();
-  assert(ctx.systemPrompt(1, 'es').indexOf('READ ALOUD TOO') > -1);
+  const segs = ctx.segments('Se dice yo estoy bien.');
+  eq(segs.length, 1);
+  eq(segs[0].lang, 'es');
+});
+
+test('46. Closing tags never end up being read out', () => {
+  const { ctx, env } = world();
+  env.speechSynthesis.spoken.length = 0;
+  ctx.speakReply({ es: 'Hola', en: '[es]Casi.[/es] [en]Use estar.[/en]' });
+  env.speechSynthesis.spoken.forEach(x => {
+    assert(x.text.indexOf('[') === -1, 'a tag leaked into speech: ' + x.text);
+  });
+});
+
+test('47. The written version of the clarification has the tags stripped out', () => {
+  const { ctx } = world();
+  eq(ctx.stripTags('[es]Casi.[/es] [en]Use estar.[/en]'), 'Casi. Use estar.');
+});
+
+test('48. The prompt only allows a clarification when he asks or makes a mistake', () => {
+  const { ctx } = world();
+  const p = ctx.systemPrompt(1, 'es');
+  assert(p.indexOf('LEAVE THIS COMPLETELY EMPTY') > -1, 'must default to saying nothing');
+  assert(p.toLowerCase().indexOf('he asked for help') > -1, 'trigger (a) missing');
+  assert(p.toLowerCase().indexOf('mistake worth fixing') > -1, 'trigger (b) missing');
+  assert(p.toLowerCase().indexOf('do not teach unprompted') > -1, 'must not lecture him unasked');
+});
+
+test('49. The prompt teaches the code-switching and how to tag it', () => {
+  const { ctx } = world();
+  const p = ctx.systemPrompt(1, 'es');
+  assert(p.indexOf('SWITCH BACK AND FORTH') > -1, 'must ask it to move between languages');
+  assert(p.indexOf('[es]') > -1 && p.indexOf('[en]') > -1, 'must show the tags');
+  assert(p.indexOf('Casi.') > -1, 'a worked example makes this far more reliable');
+});
+
+test('50. The Spanish is told to sound like a person, not a drill', () => {
+  const { ctx } = world();
+  const p = ctx.systemPrompt(1, 'es');
+  assert(p.indexOf('SOUND LIKE A REAL PERSON') > -1);
+  assert(p.indexOf('not a word limit') > -1, 'the level must not be read as a word count');
+  assert(!/[0-9]-[0-9] words per sentence/.test(p), 'the old word-count rule is what made it robotic');
+});
+
+test('51. Only a real mistake is remembered, not every explanation', () => {
+  const { ctx } = world();
+  ctx.profile.errors = [];
+  ctx.onReply({ es: 'a', en: '[es]Cobija[/es] [en]means blanket.[/en]', meta: { level: 1 } });
+  eq(ctx.profile.errors.length, 0, 'asking what a word means is not a mistake');
+  ctx.onReply({ es: 'a', en: '[en]Use estar.[/en]', meta: { level: 1, error_note: 'ser instead of estar' } });
+  eq(ctx.profile.errors.length, 1);
+  eq(ctx.profile.errors[0], 'ser instead of estar');
 });
 
 // ---------- report ----------

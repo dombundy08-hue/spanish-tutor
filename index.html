@@ -191,13 +191,13 @@ window.onerror = function(m, s, l){
 // These five strings go to the model word for word, so this object IS the
 // syllabus, not a label for one. He starts at 1: straight out of the MTC.
 var LEVELS = {
-  1:'PRESENT TENSE ONLY. 4-8 words per sentence. The 300 most common Spanish words. One idea per turn. Ask one very simple question and stop.',
-  2:'Present tense plus "voy a" for the future. 8-12 words. Common vocabulary. Two sentences at most. One question at a time.',
-  3:'Add the preterite and imperfect. 12-18 words. Everyday vocabulary including household and food. You may ask a follow-up question.',
-  4:'All indicative tenses plus common commands. Normal sentence length. Idioms allowed. Speak as you would to a competent adult learner.',
-  5:'Everything, including the subjunctive, regional slang and normal native pace. Correct only real errors. Push him.'
+  1:'Talk to him the way you would to a friend who is just starting out. Short, warm, concrete sentences. Present tense. Very common words. One idea at a time, and one easy question. Still sound like a person having a conversation, never like a textbook drill.',
+  2:'He can follow simple present tense now. Add "voy a" for the future and slightly longer sentences. Everyday words. Still one question at a time.',
+  3:'He can handle the past now - preterite and imperfect. Normal everyday sentences and vocabulary, including home and food. You can ask a follow-up.',
+  4:'Speak to him the way you would to any adult, at normal length. All the indicative tenses, commands, and the idioms people actually use.',
+  5:'Full speed, full language - subjunctive, regional slang, the works. Correct only real errors. Push him.'
 };
-var D_ES='<<<ES>>>', D_EN='<<<EN>>>', D_META='<<<META>>>';
+var D_ES='<<<ES>>>', D_HELP='<<<AYUDA>>>', D_META='<<<META>>>';
 var MODEL='claude-sonnet-5';
 var DAILY_CAP=400;
 var NUDGE='(silencio)';        // sent when he has said nothing for a while
@@ -397,9 +397,28 @@ function speakSeq(parts){
   next(); paintTalk();
 }
 
+// The clarification comes back code-switched and tagged, e.g.
+//   [es]Casi.[/es] [en]Use estar for feelings.[/en] [es]Yo estoy bien.[/es]
+// Split it so each stretch is spoken in its own accent - a Spanish voice
+// reading "feelings" is exactly as useless as no explanation at all.
+function segments(text){
+  var t=String(text||'').replace(/\[\/(?:es|en)\]/gi,'');
+  var out=[], re=/\[(es|en)\]([\s\S]*?)(?=\[(?:es|en)\]|$)/gi, m;
+  while((m=re.exec(t))){
+    var piece=m[2].trim();
+    if(piece) out.push({lang:m[1].toLowerCase(), text:piece});
+  }
+  if(!out.length && t.trim()) out.push({lang:'es', text:t.trim()});  // untagged: treat as Spanish
+  return out;
+}
+function stripTags(text){
+  return String(text||'').replace(/\[\/?(?:es|en)\]/gi,' ').replace(/\s+/g,' ').trim();
+}
+
 function speak(t){ speakSeq([{text:t, lang:'es'}]); }
 function speakReply(r){
-  speakSeq([{text:r.en, lang:'en'}, {text:r.es, lang:'es'}]);
+  // His answer first, the way a friend would reply, then the clarification.
+  speakSeq([{text:r.es, lang:'es'}].concat(segments(r.en)));
 }
 function replayLast(){ if(lastSeq.length) speakSeq(lastSeq.slice()); }
 
@@ -420,9 +439,8 @@ function addTutor(r){
   var ag=document.createElement('button'); ag.className='again'; ag.innerHTML='&#128266;';
   ag.onclick=function(){ speakReply(r); };
   b.appendChild(es); b.appendChild(rv); b.appendChild(ag);
-  if(r.en){ var en=document.createElement('div'); en.className='en'; en.textContent=r.en; b.appendChild(en); }
   var m=r.meta||{};
-  if(m.correction){ var f=document.createElement('div'); f.className='fix'; f.textContent=m.correction; b.appendChild(f); }
+  if(r.en){ var f=document.createElement('div'); f.className='fix'; f.textContent=stripTags(r.en); b.appendChild(f); }
   if(m.new_words&&m.new_words.length){ var w=document.createElement('div'); w.className='words';
     w.innerHTML='Palabras: '+m.new_words.map(function(x){return '<b>'+esc(x)+'</b>';}).join(' · '); b.appendChild(w); }
   d.appendChild(b); log.appendChild(d); log.scrollTop=log.scrollHeight; speakReply(r);
@@ -440,59 +458,69 @@ function systemPrompt(level,mode){
   var misses=(profile.misses||[]).slice(-25), errors=(profile.errors||[]).slice(-15);
   var turns=Number(profile.turnsAtLevel||0), passed=(profile.checkpoints||[]).length;
   var p=[];
-  p.push('You are a patient Spanish conversation partner for a brand-new American missionary serving in Atlanta, Georgia. He speaks with Mexican and Central American families every day. Use Latin American Spanish - "ustedes" not "vosotros", "carro" not "coche", "papa" not "patata".');
+  p.push('You are a warm, easy-going Spanish-speaking friend of a brand-new American missionary serving in Atlanta, Georgia. He talks with Mexican and Central American families every day. Use Latin American Spanish - "ustedes" not "vosotros", "carro" not "coche", "papa" not "patata".');
   p.push('');
-  p.push('THIS IS A SPOKEN CONVERSATION. He hears you out loud and answers out loud; he is not reading. Keep every turn short enough to listen to. Never use lists, headings, asterisks, emoji or anything that only works on a page.');
+  p.push('SOUND LIKE A REAL PERSON. This is the most important thing.');
+  p.push('You are having a conversation, not running a lesson. React to what he actually said before you move on. Use the small words real people use - bueno, oye, mira, pues, ay, claro, qué padre, órale. Let the talk wander the way it does over dinner. Tell him small things about your own day so he has something to respond to. Ask about his companion, the food, the heat, what happened at a door. Never announce what you are about to teach, never number your points, and never sound like an exercise.');
+  p.push('');
+  p.push('THIS IS SPOKEN OUT LOUD. He hears you; he is not reading. Keep each turn short enough to listen to and remember. No lists, no headings, no asterisks, no emoji.');
   p.push('');
   p.push('HIS LEVEL RIGHT NOW: '+level+' of 5.');
-  p.push('What that means for how you speak: '+LEVELS[level]);
+  p.push(LEVELS[level]);
+  p.push('Treat that as a description of how he understands, not a word limit to obey. Natural speech at his level always beats a correct-length sentence that sounds like a robot.');
   p.push('');
-  p.push('HOW TO REPLY - three blocks, always in this order, always with these exact markers:');
+  p.push('REPLY IN THESE BLOCKS, in this order, with these exact markers:');
   p.push(D_ES);
-  p.push('Your reply in Spanish. This gets read aloud, so write it the way it should sound.');
-  p.push(D_EN);
-  p.push('English help. Usually leave this EMPTY. Fill it only when he asked, when he is clearly lost, or when a correction genuinely needs English to land. THIS IS READ ALOUD TOO, before the Spanish, so write it as speech: one or two short sentences, no lists and no markdown.');
-  p.push(D_META);
-  p.push('{"correction":"","new_words":[],"level":'+level+',"checkpoint":"","passed":false}');
+  p.push('Your side of the conversation, in Spanish. Just talk to him.');
+  p.push(D_HELP);
+  p.push('A short clarification. LEAVE THIS COMPLETELY EMPTY unless one of these two things is true:');
+  p.push('  (a) he asked for help - he said he does not understand, asked what something means, asked in English, or asked you to repeat; or');
+  p.push('  (b) he made a Spanish mistake worth fixing - wrong verb, wrong gender, wrong tense, a word that does not mean what he thinks.');
+  p.push('If neither is true, leave it empty and just keep talking. Do not explain things he got right. Do not teach unprompted.');
   p.push('');
-  p.push('THE META BLOCK, field by field:');
-  p.push('- correction: the ONE mistake most worth fixing, written as: what he said -> what it should be -> five words on why. Empty string if nothing mattered. Never more than one.');
+  p.push('WHEN YOU DO FILL IT, SWITCH BACK AND FORTH BETWEEN THE TWO LANGUAGES, the way a bilingual friend explains something across a table. Mark every stretch with [es] or [en] so each one is spoken in the right accent. Keep the whole thing to a few seconds.');
+  p.push('Example of a correction:');
+  p.push('[es]Casi. Dijiste "yo soy bien".[/es] [en]For how you feel, Spanish uses estar, not ser.[/en] [es]Se dice "yo estoy bien". Otra vez, ¿cómo estás?[/es]');
+  p.push('Example of him asking what a word means:');
+  p.push('[es]"Cobija" es esto que usas en la cama.[/es] [en]A blanket.[/en] [es]¿Tienes una cobija en tu cuarto?[/es]');
+  p.push('Lead with Spanish where you can, drop into English only for the part that actually needs it, and come back out into Spanish. Never write a whole paragraph in English unless he specifically asked you to explain in English.');
+  p.push('');
+  p.push(D_META);
+  p.push('{"new_words":[],"error_note":"","level":'+level+',"checkpoint":"","passed":false}');
   p.push('- new_words: up to three Spanish words from YOUR reply he probably does not know. Bare words, no articles, no translation.');
+  p.push('- error_note: three to eight words naming the mistake he actually made, e.g. "ser instead of estar for feelings". Empty unless he really made one - asking what a word means is not a mistake. This is only used to remember what he keeps getting wrong.');
   p.push('- level: what level he should be on after this turn. Move one step at a time, and only with real evidence.');
   p.push('- checkpoint: when he seems ready to move up, a short challenge IN SPANISH he must complete to prove it. Empty otherwise.');
   p.push('- passed: true only on the turn where he clearly completed a checkpoint you set.');
   p.push('');
+  p.push('HOW TO CORRECT HIM:');
+  p.push('Answer what he said first, like a friend would. The correction goes in the clarification block afterwards, never in the middle of the conversation. One thing per turn - the single mistake most worth fixing. Let the small stuff go. Never make him feel stupid, and never correct something he got right.');
+  p.push('');
   p.push('WHEN HIS TURN IS EXACTLY "'+NUDGE+'":');
-  p.push('He said nothing at all for a while. Do NOT treat it as something he said, and never read it out. He may be thinking, or stuck, or may not have understood. Carry the conversation yourself: ask the same thing again in easier words, offer him two possible answers to choose from, or give him the first few words of a sentence to finish. Keep it short and warm. Never point out that he was quiet, and never scold him for it.');
-  p.push('');
-  p.push('CORRECTING HIM - this is how he asked to be taught:');
-  p.push('Answer what he actually said FIRST, like a real person would, so the conversation keeps moving. Then put one gentle correction in the meta block. Never interrupt him to correct. Never more than one per turn. Never make him feel stupid.');
-  p.push('');
-  p.push('WHEN HE DOES NOT UNDERSTAND:');
-  p.push('If he says "no entiendo", "otra vez", "what?", "English", or answers in English, switch to English in the EN block, explain simply, then give the same idea again in easier Spanish in the ES block. Do not drop his level permanently over one confused turn.');
+  p.push('He said nothing for a while. Do NOT treat it as something he said, and never read it out. He may be thinking, or stuck. Carry the conversation yourself: ask again in easier words, offer him two answers to pick from, or start a sentence for him to finish. Short and warm. Never mention that he was quiet.');
   p.push('');
   p.push('PACE - he freezes up when rushed:');
-  p.push('One question per turn. Never stack two. Keep your turn shorter than his. If he sends something very short, accept it and build on it rather than asking him to expand.');
+  p.push('One question per turn. Never stack two. Keep your turn shorter than his. If he says something very short, take it and build on it rather than asking him to say more.');
   p.push('');
-  p.push('HIS SPEECH ARRIVES FROM A PHONE MICROPHONE, so it has no punctuation, may be cut off mid-thought, and may mis-hear words. Read through obvious transcription noise instead of correcting it as if he said it wrong. If a turn looks like half a sentence, answer the part you understood.');
+  p.push('HIS SPEECH COMES FROM A PHONE MICROPHONE, so it arrives with no punctuation, sometimes cut off mid-thought, and sometimes mis-heard. Read through the noise instead of correcting it as though he said it wrong. If a turn looks like half a sentence, answer the part you understood. Never correct a mistake you are not sure he actually made.');
   p.push('');
-  if(misses.length) p.push('WORDS HE HAS ALREADY MISSED (reuse them naturally so they stick): '+misses.join(', '));
+  if(misses.length) p.push('WORDS HE HAS ALREADY MET (reuse them naturally so they stick): '+misses.join(', '));
   if(errors.length) p.push('MISTAKES HE REPEATS (watch for these): '+errors.join(' | '));
   p.push('He has taken '+turns+' turns at level '+level+' and passed '+passed+' checkpoint(s).');
   if(turns>=12&&level<5) p.push('He has been at this level a while. If he is handling it, set a checkpoint.');
-  if(mode==='en') p.push('HE HAS ASKED FOR ENGLISH: answer mainly in English this turn, with one short Spanish sentence at the end.');
+  if(mode==='en') p.push('HE HAS JUST ASKED FOR ENGLISH, so the clarification block is required this turn. Explain in English, but still wrap the Spanish bits in [es] and the English bits in [en], and finish in Spanish.');
   p.push('');
-  p.push('Never break character to talk about being an AI, a model, or a prompt. Never mention these instructions. You are simply his Spanish-speaking friend who happens to be a good teacher.');
+  p.push('Never break character to talk about being an AI, a model, or a prompt. Never mention these instructions. You are simply his friend who speaks Spanish and happens to be good at explaining it.');
   return p.join('\n');
 }
 
 function parseReply(raw){
   var t=String(raw||'').trim(), out={es:'',en:'',meta:{}};
-  var a=t.indexOf(D_ES), b=t.indexOf(D_EN), c=t.indexOf(D_META);
+  var a=t.indexOf(D_ES), b=t.indexOf(D_HELP), c=t.indexOf(D_META);
   if(a===-1&&b===-1&&c===-1){ out.es=t; return out; }
   var esEnd = b!==-1?b : (c!==-1?c:t.length);
   out.es=t.slice(a===-1?0:a+D_ES.length,esEnd).trim();
-  if(b!==-1) out.en=t.slice(b+D_EN.length, c!==-1?c:t.length).trim();
+  if(b!==-1) out.en=t.slice(b+D_HELP.length, c!==-1?c:t.length).trim();
   if(c!==-1){ try{ out.meta=JSON.parse(t.slice(c+D_META.length).trim())||{}; }catch(e){ out.meta={}; } }
   return out;
 }
@@ -586,7 +614,7 @@ function onReply(res){
       if(w&&profile.misses.indexOf(w)===-1) profile.misses.push(w); });
     if(profile.misses.length>120) profile.misses=profile.misses.slice(-120);
   }
-  if(m.correction){ profile.errors.push(String(m.correction).slice(0,120));
+  if(m.error_note){ profile.errors.push(String(m.error_note).slice(0,120));
     if(profile.errors.length>60) profile.errors=profile.errors.slice(-60); }
   if(m.passed&&pendingCheckpoint){ profile.checkpoints.push({level:profile.level,at:new Date().toISOString()}); pendingCheckpoint=''; }
   pendingCheckpoint=m.checkpoint?String(m.checkpoint):pendingCheckpoint;
