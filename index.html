@@ -151,6 +151,21 @@
 // ---------- the curriculum ----------
 // These five strings are fed to the model word for word, so this object IS the
 // syllabus, not a label for one. He starts at 1: straight out of the MTC.
+// Declared first so that anything failing below is visible instead of silent.
+// This page shipped once with `var history = []`, which throws in strict mode
+// because window.history is a getter-only native property - and because the
+// handler was installed further down, the whole script died in total silence.
+window.onerror = function(m, s, l){
+  try{
+    var lg = document.getElementById('log');
+    if(lg){ var d=document.createElement('div'); d.className='turn';
+      d.innerHTML='<div class="err">Page error: '+String(m).replace(/</g,'&lt;')+' (line '+l+')</div>';
+      lg.appendChild(d); }
+    var h = document.getElementById('hint'); if(h) h.textContent='Algo falló. Recarga la página.';
+  }catch(e){}
+  return false;
+};
+
 var LEVELS = {
   1:'PRESENT TENSE ONLY. 4-8 words per sentence. The 300 most common Spanish words. One idea per turn. Ask one very simple question and stop.',
   2:'Present tense plus "voy a" for the future. 8-12 words. Common vocabulary. Two sentences at most. One question at a time.',
@@ -165,7 +180,7 @@ var DAILY_CAP=400;
 // ---------- state ----------
 var DEFAULT={level:1,misses:[],errors:[],turnsAtLevel:0,checkpoints:[],rate:0.8,voiceURI:''};
 var profile=load('tutorProfile',DEFAULT);
-var history=[], lastSpoken='', pendingCheckpoint='', busy=false, voices=[], micLang='es-MX';
+var convo=[], lastSpoken='', pendingCheckpoint='', busy=false, voices=[], micLang='es-MX';
 var log=document.getElementById('log'), box=document.getElementById('box');
 var sendBtn=document.getElementById('send'), hint=document.getElementById('hint');
 
@@ -175,10 +190,6 @@ function save(){ try{ localStorage.setItem('tutorProfile',JSON.stringify(profile
 function getKey(){ try{ return localStorage.getItem('anthropicKey')||''; }catch(e){ return ''; } }
 function setKey(v){ try{ localStorage.setItem('anthropicKey',v); }catch(e){} }
 
-// Any uncaught error must be visible. A silent spinner is the worst failure
-// mode for someone using this alone between appointments.
-window.onerror=function(m,s,l){ try{ busy=false; sendBtn.disabled=false;
-  addError('Page error: '+m+' (line '+l+')'); hint.textContent='Algo falló. Recarga la página.'; }catch(e){} return false; };
 
 // ---------- voice out ----------
 function loadVoices(){
@@ -349,12 +360,12 @@ function send(override,mode){
   if(!getKey()){ showSetup(); return; }
   if(!underCap()){ addError('Llegaste al límite diario de '+DAILY_CAP+' turnos. Se reinicia mañana.'); return; }
 
-  if(text){ addMine(text); history.push({role:'me',text:text}); }
+  if(text){ addMine(text); convo.push({role:'me',text:text}); }
   box.value=''; sizeBox();
   busy=true; sendBtn.disabled=true; hint.textContent='Pensando…';
 
   var msgs=[];
-  history.slice(-20).forEach(function(t){
+  convo.slice(-20).forEach(function(t){
     if(t&&t.text) msgs.push({role:t.role==='tutor'?'assistant':'user',content:String(t.text)});
   });
   if(!msgs.length) msgs.push({role:'user',content:'(Empezamos. Salúdame.)'});
@@ -412,7 +423,7 @@ function ask(system,messages){
 
 function onReply(res){
   busy=false; sendBtn.disabled=false; paintMic();
-  addTutor(res); history.push({role:'tutor',text:res.es});
+  addTutor(res); convo.push({role:'tutor',text:res.es});
   var m=res.meta||{};
   profile.turnsAtLevel=(profile.turnsAtLevel||0)+1;
   if(m.new_words&&m.new_words.length){
@@ -478,7 +489,7 @@ document.getElementById('bKey').onclick=function(){
 };
 document.getElementById('bReset').onclick=function(){
   if(!confirm('¿Borrar todo tu progreso?')) return;
-  profile=JSON.parse(JSON.stringify(DEFAULT)); history=[]; pendingCheckpoint=''; log.innerHTML='';
+  profile=JSON.parse(JSON.stringify(DEFAULT)); convo=[]; pendingCheckpoint=''; log.innerHTML='';
   save(); paintLevel(); document.getElementById('panel').style.display='none';
 };
 
@@ -490,7 +501,7 @@ document.getElementById('keySave').onclick=function(){
   setKey(v);
   document.getElementById('setup').style.display='none';
   document.getElementById('keyErr').textContent='';
-  if(!history.length) send('','es');
+  if(!convo.length) send('','es');
 };
 
 // ---------- go ----------

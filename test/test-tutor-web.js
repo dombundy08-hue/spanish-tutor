@@ -307,6 +307,32 @@ atest('24. Booting with a key fires the opening greeting instead of sitting sile
   assert(!els.setup || els.setup.style.display !== 'block', 'setup sheet should stay closed');
 });
 
+test('25. No top-level name collides with a read-only browser global', () => {
+  // The page shipped once with `var history = []`. In a browser window.history
+  // is a getter-only own property, so in strict mode that assignment throws and
+  // every line below it silently never runs - no error, no output, a dead page.
+  // Node's vm does NOT reproduce this (it redefines the property rather than
+  // assigning to it), so running the code here would never have caught it.
+  // Hence a static check: it is the only thing that would have.
+  const RISKY = ['history','location','name','status','top','parent','self','length',
+    'origin','closed','frames','event','external','screen','navigator','document',
+    'window','performance','localStorage','sessionStorage','crypto','caches',
+    'scrollX','scrollY','innerWidth','innerHeight','opener','frameElement'];
+  const declared = new Set();
+  SRC.split(/\r?\n/).forEach(line => {
+    let m = line.match(/^var\s+(.+)$/);
+    if (m) m[1].split(',').forEach(part => {
+      const id = part.trim().split(/[=;\s]/)[0];
+      if (/^[A-Za-z_$][\w$]*$/.test(id)) declared.add(id);
+    });
+    m = line.match(/^function\s+([A-Za-z_$][\w$]*)/);
+    if (m) declared.add(m[1]);
+  });
+  assert(declared.size > 10, 'the scan found almost nothing - the regex is wrong, not the code');
+  const clash = RISKY.filter(r => declared.has(r));
+  eq(clash.join(','), '', 'these top-level names shadow browser globals and will kill the page');
+});
+
 // ---------- report ----------
 (async () => {
   for (const t of queue) {
