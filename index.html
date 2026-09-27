@@ -215,7 +215,7 @@ if(Number(profile.settingsV||0) < 2){
   if(Number(profile.idleSec)===10) profile.idleSec=8;
   profile.settingsV=2; save();
 }
-var convo=[], lastSpoken='', pendingCheckpoint='', busy=false, voices=[];
+var convo=[], pendingCheckpoint='', busy=false, voices=[];
 var log=document.getElementById('log'), box=document.getElementById('box');
 var hint=document.getElementById('hint');
 
@@ -335,28 +335,73 @@ function rank(v){ var s=0;
   if(/es[-_](US|GT|SV|HN|CO)/i.test(v.lang)) s+=6;
   if(/es[-_]ES/i.test(v.lang)) s+=1;
   if(v.localService) s+=2; return s; }
-function cancelSpeak(){ try{ speechSynthesis.cancel(); }catch(e){} paintTalk(); }
-function speak(t){
-  if(!t||!window.speechSynthesis) return;
-  try{
-    speechSynthesis.cancel();
-    // Without headphones the mic would hear the tutor, so stand it down while
-    // the tutor talks and bring it back the moment it stops.
-    if(!profile.handsFree) stopRec();
-    var u=new SpeechSynthesisUtterance(t);
-    var v=voices.filter(function(x){return x.voiceURI===profile.voiceURI;})[0];
-    if(v) u.voice=v;
-    u.lang=v?v.lang:'es-MX';
-    u.rate=Number(profile.rate)||0.8;
-    u.onend=u.onerror=function(){
-      conv.lastVoiceAt=Date.now();   // the idle clock starts when IT stops talking
-      if(conv.on && !profile.handsFree) startRec();
-      paintTalk();
-    };
-    speechSynthesis.speak(u); lastSpoken=t;
-    paintTalk();
-  }catch(e){}
+// When he is lost the tutor answers in English as well as Spanish, and BOTH
+// get read aloud - he is usually not looking at the screen. English first,
+// because it is the explanation, then the easier Spanish retry.
+var seqId=0, lastSeq=[];
+var EN_RATE=1.0;   // his own language; the slow rate is for Spanish comprehension
+
+function voiceFor(lang){
+  var want = lang==='en' ? /^en/i : /^es/i;
+  var pool = voices.filter(function(v){ return want.test(v.lang); });
+  if(!pool.length) return null;
+  if(lang==='es'){
+    var chosen = pool.filter(function(v){ return v.voiceURI===profile.voiceURI; })[0];
+    if(chosen) return chosen;
+    pool.sort(function(a,b){ return rank(b)-rank(a); });
+    return pool[0];
+  }
+  pool.sort(function(a,b){
+    var sa=(/en[-_]US/i.test(a.lang)?2:0)+(a.localService?1:0);
+    var sb=(/en[-_]US/i.test(b.lang)?2:0)+(b.localService?1:0);
+    return sb-sa;
+  });
+  return pool[0];
 }
+
+function restoreMic(){
+  conv.lastVoiceAt=Date.now();          // the idle clock starts when IT stops talking
+  if(conv.on && !profile.handsFree) startRec();
+  paintTalk();
+}
+function cancelSpeak(){
+  seqId++;                              // abandons any queued part of the sequence
+  try{ speechSynthesis.cancel(); }catch(e){}
+  restoreMic();
+}
+
+function speakSeq(parts){
+  parts=(parts||[]).filter(function(p){ return p && String(p.text).trim(); });
+  if(!parts.length || !window.speechSynthesis) return;
+  var mine=++seqId;
+  try{ speechSynthesis.cancel(); }catch(e){}
+  // Without headphones the mic would hear the tutor, so stand it down while it
+  // talks and bring it back the moment the whole sequence ends.
+  if(!profile.handsFree) stopRec();
+  lastSeq=parts.slice();
+  var i=0;
+  function next(){
+    if(mine!==seqId) return;            // cancelled, or a newer reply took over
+    if(i>=parts.length){ restoreMic(); return; }
+    var p=parts[i++];
+    try{
+      var u=new SpeechSynthesisUtterance(p.text);
+      var v=voiceFor(p.lang);
+      if(v) u.voice=v;
+      u.lang = v ? v.lang : (p.lang==='en' ? 'en-US' : 'es-MX');
+      u.rate = p.lang==='en' ? EN_RATE : (Number(profile.rate)||0.8);
+      u.onend=u.onerror=next;
+      speechSynthesis.speak(u);
+    }catch(e){ next(); }
+  }
+  next(); paintTalk();
+}
+
+function speak(t){ speakSeq([{text:t, lang:'es'}]); }
+function speakReply(r){
+  speakSeq([{text:r.en, lang:'en'}, {text:r.es, lang:'es'}]);
+}
+function replayLast(){ if(lastSeq.length) speakSeq(lastSeq.slice()); }
 
 // ---------- rendering ----------
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -373,14 +418,14 @@ function addTutor(r){
   var rv=document.createElement('button'); rv.className='reveal'; rv.textContent='Mostrar el texto';
   rv.onclick=function(){ es.textContent=r.es; es.classList.remove('hidden-text'); rv.remove(); };
   var ag=document.createElement('button'); ag.className='again'; ag.innerHTML='&#128266;';
-  ag.onclick=function(){ speak(r.es); };
+  ag.onclick=function(){ speakReply(r); };
   b.appendChild(es); b.appendChild(rv); b.appendChild(ag);
   if(r.en){ var en=document.createElement('div'); en.className='en'; en.textContent=r.en; b.appendChild(en); }
   var m=r.meta||{};
   if(m.correction){ var f=document.createElement('div'); f.className='fix'; f.textContent=m.correction; b.appendChild(f); }
   if(m.new_words&&m.new_words.length){ var w=document.createElement('div'); w.className='words';
     w.innerHTML='Palabras: '+m.new_words.map(function(x){return '<b>'+esc(x)+'</b>';}).join(' · '); b.appendChild(w); }
-  d.appendChild(b); log.appendChild(d); log.scrollTop=log.scrollHeight; speak(r.es);
+  d.appendChild(b); log.appendChild(d); log.scrollTop=log.scrollHeight; speakReply(r);
 }
 function paintLevel(){
   document.getElementById('lvl').textContent='Nivel '+profile.level;
@@ -406,7 +451,7 @@ function systemPrompt(level,mode){
   p.push(D_ES);
   p.push('Your reply in Spanish. This gets read aloud, so write it the way it should sound.');
   p.push(D_EN);
-  p.push('English help. Usually leave this EMPTY. Fill it only when he asked, when he is clearly lost, or when a correction genuinely needs English to land.');
+  p.push('English help. Usually leave this EMPTY. Fill it only when he asked, when he is clearly lost, or when a correction genuinely needs English to land. THIS IS READ ALOUD TOO, before the Spanish, so write it as speech: one or two short sentences, no lists and no markdown.');
   p.push(D_META);
   p.push('{"correction":"","new_words":[],"level":'+level+',"checkpoint":"","passed":false}');
   p.push('');
@@ -572,18 +617,18 @@ box.addEventListener('keydown',function(e){
   var phone=/Android|iPhone|iPad/i.test(navigator.userAgent);
   if(e.key==='Enter'&&!e.shiftKey&&!phone){ e.preventDefault(); send(); }
 });
-document.getElementById('bRepeat').onclick=function(){ speak(lastSpoken); };
+document.getElementById('bRepeat').onclick=function(){ replayLast(); };
 document.getElementById('bSlow').onclick=function(){
   profile.rate=Math.max(0.5,(Number(profile.rate)||0.8)-0.1); save();
   document.getElementById('rate').value=profile.rate;
   document.getElementById('rateVal').textContent=Number(profile.rate).toFixed(2);
-  speak(lastSpoken);
+  replayLast();
 };
 document.getElementById('bFast').onclick=function(){
   profile.rate=Math.min(1.2,(Number(profile.rate)||0.8)+0.1); save();
   document.getElementById('rate').value=profile.rate;
   document.getElementById('rateVal').textContent=Number(profile.rate).toFixed(2);
-  speak(lastSpoken);
+  replayLast();
 };
 document.getElementById('bLost').onclick=function(){ cancelSpeak(); send('No entiendo.','en'); };
 document.getElementById('bEn').onclick=function(){ cancelSpeak(); send('Can you explain that in English?','en'); };

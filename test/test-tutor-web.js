@@ -45,8 +45,15 @@ function makeEnv(opts) {
     // Enough of a microphone and a voice for the page to boot and run a turn.
     SpeechRecognition: function () { this.start = () => {}; this.stop = () => {}; },
     speechSynthesis: {
-      speaking: false, cancel() {}, getVoices() { return []; },
-      speak(u) { if (u && u.onend) u.onend(); }
+      speaking: false, spoken: [], autoEnd: true, pending: [],
+      cancel() { this.pending.length = 0; },
+      getVoices() { return opts.voices || []; },
+      speak(u) {
+        this.spoken.push({ text: u.text, lang: u.lang, rate: u.rate,
+                           voice: u.voice ? u.voice.voiceURI : null });
+        if (this.autoEnd) { if (u.onend) u.onend(); }
+        else this.pending.push(u);
+      }
     },
     SpeechSynthesisUtterance: function (t) { this.text = t; },
     navigator: { userAgent: 'node', clipboard: null },
@@ -441,6 +448,72 @@ test('38. Slower still works and stops at the minimum', () => {
   assert(ctx.profile.rate >= 0.5, 'went below the minimum: ' + ctx.profile.rate);
   for (let i = 0; i < 12; i++) ctx.document.getElementById('bSlow').onclick();
   eq(Number(ctx.profile.rate.toFixed(2)), 0.5);
+});
+
+test('39. When he is lost, the English is spoken too - English first', () => {
+  const { ctx, env } = world();
+  env.speechSynthesis.spoken.length = 0;
+  ctx.speakReply({ es: 'Vamos otra vez. ¿Cómo está?', en: 'I asked how you are doing.' });
+  const said = env.speechSynthesis.spoken;
+  eq(said.length, 2, 'both halves should be read aloud');
+  eq(said[0].text, 'I asked how you are doing.', 'the explanation comes first');
+  eq(said[1].text, 'Vamos otra vez. ¿Cómo está?', 'then the easier Spanish retry');
+});
+
+test('40. The English half is spoken with an English voice, not the Spanish one', () => {
+  const { ctx, env } = world();
+  env.speechSynthesis.spoken.length = 0;
+  ctx.speakReply({ es: 'Hola', en: 'Hello there.' });
+  assert(/^en/i.test(env.speechSynthesis.spoken[0].lang), 'got ' + env.speechSynthesis.spoken[0].lang);
+  assert(/^es/i.test(env.speechSynthesis.spoken[1].lang), 'got ' + env.speechSynthesis.spoken[1].lang);
+});
+
+test('41. English is read at native speed even when Spanish is slowed right down', () => {
+  const { ctx, env } = world();
+  ctx.profile.rate = 0.5;
+  env.speechSynthesis.spoken.length = 0;
+  ctx.speakReply({ es: 'Hola', en: 'Hello there.' });
+  eq(env.speechSynthesis.spoken[0].rate, 1.0, 'English should not crawl - it is his own language');
+  eq(env.speechSynthesis.spoken[1].rate, 0.5, 'Spanish keeps his chosen rate');
+});
+
+test('42. An ordinary reply with no English says only the Spanish', () => {
+  const { ctx, env } = world();
+  env.speechSynthesis.spoken.length = 0;
+  ctx.speakReply({ es: 'Muy bien, élder.', en: '' });
+  eq(env.speechSynthesis.spoken.length, 1);
+  assert(/^es/i.test(env.speechSynthesis.spoken[0].lang));
+});
+
+test('43. Interrupting during the English does not let the Spanish follow it', () => {
+  // The bug this guards: cancel() drops the queued half, but a naive chain
+  // would fire onend and start speaking the next part anyway.
+  const { ctx, env } = world();
+  env.speechSynthesis.autoEnd = false;
+  env.speechSynthesis.spoken.length = 0;
+  ctx.speakReply({ es: 'Segunda parte', en: 'First part' });
+  eq(env.speechSynthesis.spoken.length, 1, 'only the first part should have started');
+  // Hold the utterance BEFORE cancelling - cancel() discards the queue, and a
+  // test that reads it afterwards proves nothing at all.
+  const u = env.speechSynthesis.pending[0];
+  assert(u && u.onend, 'the in-flight utterance should carry an onend handler');
+  ctx.cancelSpeak();
+  u.onend();                              // a real browser fires this on cancel
+  eq(env.speechSynthesis.spoken.length, 1, 'the Spanish must not start after a cancel');
+});
+
+test('44. Repeat replays both halves, not just the Spanish', () => {
+  const { ctx, env } = world();
+  ctx.speakReply({ es: 'Hola', en: 'Hello.' });
+  env.speechSynthesis.spoken.length = 0;
+  ctx.replayLast();
+  eq(env.speechSynthesis.spoken.length, 2);
+  eq(env.speechSynthesis.spoken[0].text, 'Hello.');
+});
+
+test('45. The prompt warns that the English block is spoken aloud', () => {
+  const { ctx } = world();
+  assert(ctx.systemPrompt(1, 'es').indexOf('READ ALOUD TOO') > -1);
 });
 
 // ---------- report ----------
