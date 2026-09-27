@@ -4,12 +4,29 @@ A talking Spanish conversation partner that runs entirely in your browser.
 One HTML file, no build step, no server, no account.
 
 - **It talks to you** in Spanish, slowly, at a level it adjusts as you improve.
-- **You talk back** with the microphone — it keeps listening through your pauses
-  and only sends when you tap the mic again, so you can take as long as you like.
-- **The Spanish text starts hidden** so your ear has to do the work. One tap
-  shows it when you're stuck.
+- **You just talk.** Tap *Hablar* once and it's a conversation — it hears you
+  stop, waits a couple of seconds in case you're still thinking, then answers.
+  No send button, no submitting text.
+- **If you go quiet it carries the conversation.** Say nothing for ten seconds
+  and it speaks first — re-asking in easier words, offering you two answers to
+  pick from, or starting a sentence for you to finish.
+- **You can cut it off.** Tap the screen while it's talking and it stops and
+  listens. With headphones on you can enable hands-free and just interrupt by
+  talking over it.
+- **The Spanish text starts hidden** so your ear does the work. One tap reveals it.
 - **It corrects you gently**, after it has answered, one thing per turn.
 - **Say "no entiendo"** and it switches to English, explains, and goes back.
+
+Both timings are adjustable in settings: how long it waits after you stop
+talking (default 2.5s) and how long before it fills a silence (default 10s).
+
+### About the microphone and the speaker
+
+On speakerphone the mic hears the tutor's own voice, so by default the mic
+stands down while the tutor is speaking and comes back the instant it stops —
+that's why interrupting is a screen tap rather than talking over it. Turn on
+**Audífonos** in settings when you have headphones in and the mic stays live
+throughout, so you can interrupt by voice.
 
 ## Your API key
 
@@ -44,10 +61,11 @@ ever moves **one step at a time**, whatever the model asks for.
 node test/test-tutor-web.js
 ```
 
-24 tests, no network and no browser: the harness pulls the `<script>` block out
+34 tests, no network and no browser: the harness pulls the `<script>` block out
 of `index.html` and runs it against a small fake DOM. They cover reply parsing
-(including malformed replies), the level ladder, the retry policy, and that the
-API key never reaches a URL.
+(including malformed replies), the level ladder, the retry policy, the
+conversation clock that decides when to send and when to fill a silence, and
+that the API key never reaches a URL.
 
 ## Why not Google Apps Script
 

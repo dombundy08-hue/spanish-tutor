@@ -40,6 +40,15 @@ function makeEnv(opts) {
     JSON, Math, Date, Promise, String, Number, Array, Object, Error, TypeError,
     setTimeout: (fn) => fn(),          // retries run instantly in tests
     clearTimeout: () => {},
+    setInterval: () => 1,              // the conversation clock is driven by hand
+    clearInterval: () => {},
+    // Enough of a microphone and a voice for the page to boot and run a turn.
+    SpeechRecognition: function () { this.start = () => {}; this.stop = () => {}; },
+    speechSynthesis: {
+      speaking: false, cancel() {}, getVoices() { return []; },
+      speak(u) { if (u && u.onend) u.onend(); }
+    },
+    SpeechSynthesisUtterance: function (t) { this.text = t; },
     navigator: { userAgent: 'node', clipboard: null },
     localStorage: {
       getItem: k => (k in store ? store[k] : null),
@@ -296,15 +305,30 @@ test('23. With no key saved, the setup sheet is shown instead of calling out', (
   eq(els.setup.style.display, 'block', 'setup sheet should be open');
 });
 
-atest('24. Booting with a key fires the opening greeting instead of sitting silent', async () => {
-  // This is the bug the Apps Script version shipped with: send('') was treated
-  // as an empty message and dropped, so the page loaded and never said hello.
+atest('24. Loading does not call out on its own - it waits for the talk button', async () => {
   const f = fetcher([reply(GOOD)]);
-  const { els } = makeEnv({ store: { anthropicKey: KEY }, fetch: f });
+  makeEnv({ store: { anthropicKey: KEY }, fetch: f });
   await new Promise(r => setImmediate(r));
-  eq(f.calls.length, 1, 'the page must greet him on load');
-  // If the sheet was never even looked up, it was never opened - also correct.
-  assert(!els.setup || els.setup.style.display !== 'block', 'setup sheet should stay closed');
+  eq(f.calls.length, 0, 'the page must not start talking before he asks it to');
+});
+
+atest('24b. Tapping talk greets him instead of sitting in silence', async () => {
+  // The Apps Script build shipped with this broken: send('') was treated as an
+  // empty message and dropped, so it opened and never said hello.
+  const f = fetcher([reply(GOOD)]);
+  const { ctx } = makeEnv({ store: { anthropicKey: KEY }, fetch: f });
+  ctx.convStart();
+  await new Promise(r => setImmediate(r));
+  eq(f.calls.length, 1, 'starting a conversation must produce the opening greeting');
+});
+
+atest('24c. Tapping talk with no key asks for the key rather than failing', async () => {
+  const f = fetcher([reply(GOOD)]);
+  const { ctx, els } = makeEnv({ store: {}, fetch: f });
+  ctx.convStart();
+  await new Promise(r => setImmediate(r));
+  eq(f.calls.length, 0);
+  eq(els.setup.style.display, 'block');
 });
 
 test('25. No top-level name collides with a read-only browser global', () => {
@@ -331,6 +355,47 @@ test('25. No top-level name collides with a read-only browser global', () => {
   assert(declared.size > 10, 'the scan found almost nothing - the regex is wrong, not the code');
   const clash = RISKY.filter(r => declared.has(r));
   eq(clash.join(','), '', 'these top-level names shadow browser globals and will kill the page');
+});
+
+test('26. The clock waits while the tutor is talking or thinking', () => {
+  const { ctx } = world();
+  const base = { heard: 'hola', quietMs: 99999, silenceMs: 2500, idleMs: 10000 };
+  eq(ctx.decide(Object.assign({}, base, { speaking: true, thinking: false })), 'wait');
+  eq(ctx.decide(Object.assign({}, base, { speaking: false, thinking: true })), 'wait');
+});
+
+test('27. It sends once he has stopped talking for long enough', () => {
+  const { ctx } = world();
+  eq(ctx.decide({ heard: 'tengo una pregunta', quietMs: 2600, silenceMs: 2500, idleMs: 10000, speaking: false, thinking: false }), 'send');
+});
+
+test('28. A pause shorter than the threshold does not cut him off mid-thought', () => {
+  const { ctx } = world();
+  eq(ctx.decide({ heard: 'yo creo que', quietMs: 1200, silenceMs: 2500, idleMs: 10000, speaking: false, thinking: false }), 'wait');
+});
+
+test('29. Saying nothing at all for the idle time makes the tutor speak first', () => {
+  const { ctx } = world();
+  eq(ctx.decide({ heard: '', quietMs: 10500, silenceMs: 2500, idleMs: 10000, speaking: false, thinking: false }), 'nudge');
+});
+
+test('30. A short silence is not treated as him being stuck', () => {
+  const { ctx } = world();
+  eq(ctx.decide({ heard: '', quietMs: 4000, silenceMs: 2500, idleMs: 10000, speaking: false, thinking: false }), 'wait');
+});
+
+test('31. Whitespace the recogniser emitted does not count as speech', () => {
+  const { ctx } = world();
+  eq(ctx.decide({ heard: '   ', quietMs: 11000, silenceMs: 2500, idleMs: 10000, speaking: false, thinking: false }), 'nudge',
+     'blank audio should nudge, not send an empty turn');
+});
+
+test('32. The silence marker is explained to the model and never read aloud', () => {
+  const { ctx } = world();
+  const s = ctx.systemPrompt(1, 'es');
+  assert(s.indexOf(ctx.NUDGE) > -1, 'the marker itself must appear in the prompt');
+  assert(s.toLowerCase().indexOf('never read it out') > -1, 'must tell it not to speak the marker');
+  assert(s.toLowerCase().indexOf('spoken conversation') > -1, 'must say this is speech, not text');
 });
 
 // ---------- report ----------

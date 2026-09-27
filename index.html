@@ -5,22 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Compañero de español</title>
 <!--
-  A talking Spanish conversation partner for a missionary learning Spanish.
+  A talking Spanish conversation partner. One file, no build step, no server.
 
-  Deliberately ONE file with no build step and no server. It is served from
-  GitHub Pages, which matters for two reasons:
-
-    1. A real https origin means the microphone actually works. The first
-       version of this lived in a Google Apps Script web app, and Apps Script
-       serves your page inside a Google iframe whose permission list does not
-       include "microphone" - verified 2026-09-26. No amount of code fixes that.
+  Served from GitHub Pages, which matters twice over:
+    1. A real https origin means the microphone works. The first version lived
+       in a Google Apps Script web app, and Apps Script serves your page inside
+       a Google iframe whose permission list does not include "microphone" -
+       verified 2026-09-26. No amount of code fixes that.
     2. Anthropic allows direct browser calls when you opt in with the
-       anthropic-dangerous-direct-browser-access header. That is meant for
+       anthropic-dangerous-direct-browser-access header, which exists for
        exactly this: a personal, bring-your-own-key tool.
 
-  The API key lives in this browser's localStorage and is sent to nowhere
-  except api.anthropic.com. It is never committed, never logged, never put in
-  a URL. Anyone else who opens this page has to bring their own.
+  The API key lives in this browser's localStorage and goes nowhere except
+  api.anthropic.com. It is never committed, logged, or put in a URL.
 -->
 <style>
   :root{
@@ -29,11 +26,9 @@
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;overscroll-behavior:none}
-  body{
-    background:var(--bg);color:var(--ink);
+  body{background:var(--bg);color:var(--ink);
     font:17px/1.55 -apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
-    display:flex;flex-direction:column;height:100dvh;overflow:hidden;
-  }
+    display:flex;flex-direction:column;height:100dvh;overflow:hidden}
   header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--card);border-bottom:1px solid var(--line);flex:0 0 auto}
   .lvl{background:var(--accent);color:#1a1200;font-weight:700;border-radius:999px;padding:4px 12px;font-size:14px;white-space:nowrap}
   .title{font-size:15px;color:var(--dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -54,19 +49,28 @@
   .words b{color:var(--accent);font-weight:600}
   .again{background:none;border:0;color:var(--dim);font-size:20px;padding:4px 8px;cursor:pointer}
   .err{background:#3a1f1f;border:1px solid #6b3030;color:#ffd7d7;border-radius:12px;padding:11px;font-size:15px}
+  .quiet{color:var(--dim);font-size:14px;font-style:italic;text-align:center;margin:6px 0 16px}
+
+  /* tap anywhere over the log to cut the tutor off */
+  #barge{display:none;position:absolute;left:0;right:0;top:0;bottom:0;z-index:5;background:transparent}
+  #bargeTip{display:none;position:absolute;left:50%;transform:translateX(-50%);bottom:14px;z-index:6;
+    background:#232a3a;border:1px solid var(--line);color:var(--dim);border-radius:999px;padding:8px 16px;font-size:14px}
+  #stage{position:relative;flex:1 1 auto;display:flex;min-height:0}
 
   footer{flex:0 0 auto;background:var(--card);border-top:1px solid var(--line);padding:10px 12px 14px}
   .quick{display:flex;gap:8px;overflow-x:auto;padding-bottom:9px}
   .quick button{flex:0 0 auto;background:#232a3a;border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:9px 14px;font-size:15px;cursor:pointer}
-  .row{display:flex;gap:9px;align-items:flex-end}
-  textarea{flex:1;background:#0d0f15;color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:12px;font:inherit;resize:none;min-height:56px;max-height:130px}
+  .row{display:flex;gap:9px;align-items:center}
+  .talk{flex:1;height:60px;border:0;border-radius:16px;background:var(--good);color:#06210f;font-size:18px;font-weight:700;cursor:pointer}
+  .talk.on{background:var(--live);color:#fff}
+  .talk.on.hearing{animation:pulse 1.1s infinite}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(224,85,90,.55)}50%{box-shadow:0 0 0 13px rgba(224,85,90,0)}}
+  .kbd{width:60px;height:60px;border-radius:16px;border:1px solid var(--line);background:#232a3a;color:var(--ink);font-size:21px;cursor:pointer;flex:0 0 auto}
+  .typerow{display:none;gap:9px;margin-top:9px}
+  textarea{flex:1;background:#0d0f15;color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:12px;font:inherit;resize:none;min-height:52px;max-height:120px}
   textarea:focus{outline:none;border-color:var(--accent)}
-  .mic{width:56px;height:56px;border-radius:50%;border:0;background:#232a3a;color:var(--ink);font-size:23px;cursor:pointer;flex:0 0 auto}
-  .mic.on{background:var(--live);animation:pulse 1.3s infinite}
-  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(224,85,90,.6)}50%{box-shadow:0 0 0 12px rgba(224,85,90,0)}}
-  #send{background:var(--accent);color:#1a1200;border:0;border-radius:14px;padding:0 18px;height:56px;font-size:17px;font-weight:700;cursor:pointer;flex:0 0 auto}
-  #send:disabled{opacity:.45}
-  .hint{margin:9px 2px 0;font-size:13px;color:var(--dim);text-align:center;min-height:18px}
+  #send{background:var(--accent);color:#1a1200;border:0;border-radius:14px;padding:0 18px;height:52px;font-size:17px;font-weight:700;cursor:pointer}
+  .hint{margin:9px 2px 0;font-size:13.5px;color:var(--dim);text-align:center;min-height:19px}
 
   .sheet{display:none;position:fixed;inset:0;background:rgba(10,12,17,.97);padding:22px;overflow-y:auto;z-index:20}
   .sheet h2{margin:0 0 6px;font-size:20px}
@@ -77,6 +81,8 @@
   .pbtn{display:block;width:100%;margin-top:11px;background:#232a3a;border:1px solid var(--line);color:var(--ink);border-radius:12px;padding:13px;font-size:16px;cursor:pointer}
   .pbtn.go{background:var(--accent);color:#1a1200;border:0;font-weight:700}
   .pbtn.danger{border-color:var(--warn);color:var(--warn)}
+  .switch{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px}
+  .switch input{width:auto;transform:scale(1.4)}
 </style>
 </head>
 <body>
@@ -87,25 +93,31 @@
   <button class="gear" id="gear" aria-label="Ajustes">&#9881;</button>
 </header>
 <div id="check"></div>
-<div id="log"></div>
+
+<div id="stage">
+  <div id="log"></div>
+  <div id="barge"></div>
+  <div id="bargeTip">Toca para interrumpir</div>
+</div>
 
 <footer>
   <div class="quick">
+    <button id="bLost">&#10067; No entiendo</button>
     <button id="bRepeat">&#128266; Otra vez</button>
     <button id="bSlow">&#128034; Más despacio</button>
-    <button id="bLost">&#10067; No entiendo</button>
     <button id="bEn">English</button>
-    <button id="bLang" title="Idioma del micrófono">&#127474;&#127485;</button>
   </div>
   <div class="row">
-    <button class="mic" id="mic" aria-label="Hablar">&#127908;</button>
-    <textarea id="box" rows="1" placeholder="Toca el micrófono o escribe…"></textarea>
+    <button class="talk" id="talk">&#127908;&nbsp; Hablar</button>
+    <button class="kbd" id="kbd" aria-label="Escribir">&#9000;</button>
+  </div>
+  <div class="typerow" id="typerow">
+    <textarea id="box" rows="1" placeholder="Escribe…"></textarea>
     <button id="send">&#9654;</button>
   </div>
-  <div class="hint" id="hint">Toca el micrófono y habla. Tómate todo el tiempo que quieras.</div>
+  <div class="hint" id="hint">Toca «Hablar» y empieza una conversación.</div>
 </footer>
 
-<!-- first-run setup -->
 <div class="sheet" id="setup">
   <h2>Una cosa antes de empezar</h2>
   <p class="note">
@@ -120,13 +132,24 @@
   <p class="note" id="keyErr" style="color:var(--warn)"></p>
 </div>
 
-<!-- settings -->
 <div class="sheet" id="panel">
   <h2>Ajustes</h2>
   <label>Voz</label>
   <select id="voice"></select>
   <label>Velocidad — <span id="rateVal">0.80</span></label>
   <input type="range" id="rate" min="0.5" max="1.2" step="0.05" value="0.8">
+  <label>Cuánto espera después de que dejas de hablar — <span id="silVal">2.5</span> s</label>
+  <input type="range" id="sil" min="1" max="6" step="0.5" value="2.5">
+  <label>Si no dices nada, empieza a hablar después de — <span id="idleVal">10</span> s</label>
+  <input type="range" id="idle" min="5" max="30" step="1" value="10">
+  <div class="switch">
+    <span>Audífonos (me puede oír mientras habla)</span>
+    <input type="checkbox" id="hf">
+  </div>
+  <p class="note">Leave this off when the phone is on speaker. With it on, the mic
+    stays live while the tutor talks so you can cut in by voice — but on a
+    speaker it will hear itself and talk over you. With it off, tap the screen to
+    interrupt instead.</p>
   <label>Nivel</label>
   <select id="lvlSel">
     <option value="1">1 — Solo presente, frases muy cortas</option>
@@ -148,13 +171,10 @@
 <script>
 'use strict';
 
-// ---------- the curriculum ----------
-// These five strings are fed to the model word for word, so this object IS the
-// syllabus, not a label for one. He starts at 1: straight out of the MTC.
-// Declared first so that anything failing below is visible instead of silent.
-// This page shipped once with `var history = []`, which throws in strict mode
-// because window.history is a getter-only native property - and because the
-// handler was installed further down, the whole script died in total silence.
+// Installed as the very first statement. This page once shipped with
+// `var history = []` at top level; window.history is a getter-only own
+// property, so in strict mode that line THREW and every statement below it
+// silently never ran - the page rendered and did nothing, with no error at all.
 window.onerror = function(m, s, l){
   try{
     var lg = document.getElementById('log');
@@ -166,6 +186,9 @@ window.onerror = function(m, s, l){
   return false;
 };
 
+// ---------- the curriculum ----------
+// These five strings go to the model word for word, so this object IS the
+// syllabus, not a label for one. He starts at 1: straight out of the MTC.
 var LEVELS = {
   1:'PRESENT TENSE ONLY. 4-8 words per sentence. The 300 most common Spanish words. One idea per turn. Ask one very simple question and stop.',
   2:'Present tense plus "voy a" for the future. 8-12 words. Common vocabulary. Two sentences at most. One question at a time.',
@@ -176,13 +199,15 @@ var LEVELS = {
 var D_ES='<<<ES>>>', D_EN='<<<EN>>>', D_META='<<<META>>>';
 var MODEL='claude-sonnet-5';
 var DAILY_CAP=400;
+var NUDGE='(silencio)';        // sent when he has said nothing for a while
 
 // ---------- state ----------
-var DEFAULT={level:1,misses:[],errors:[],turnsAtLevel:0,checkpoints:[],rate:0.8,voiceURI:''};
+var DEFAULT={level:1,misses:[],errors:[],turnsAtLevel:0,checkpoints:[],
+             rate:0.8,voiceURI:'',silenceSec:2.5,idleSec:10,handsFree:false};
 var profile=load('tutorProfile',DEFAULT);
-var convo=[], lastSpoken='', pendingCheckpoint='', busy=false, voices=[], micLang='es-MX';
+var convo=[], lastSpoken='', pendingCheckpoint='', busy=false, voices=[];
 var log=document.getElementById('log'), box=document.getElementById('box');
-var sendBtn=document.getElementById('send'), hint=document.getElementById('hint');
+var hint=document.getElementById('hint');
 
 function load(k,d){ try{ var r=localStorage.getItem(k); if(!r) return JSON.parse(JSON.stringify(d));
   var p=JSON.parse(r); for(var x in d) if(!(x in p)) p[x]=d[x]; return p; }catch(e){ return JSON.parse(JSON.stringify(d)); } }
@@ -190,6 +215,99 @@ function save(){ try{ localStorage.setItem('tutorProfile',JSON.stringify(profile
 function getKey(){ try{ return localStorage.getItem('anthropicKey')||''; }catch(e){ return ''; } }
 function setKey(v){ try{ localStorage.setItem('anthropicKey',v); }catch(e){} }
 
+// ---------- the conversation clock ----------
+// Pulled out as a pure function because the whole feel of the thing lives here
+// and timers are miserable to test any other way.
+//   'send'  - he has stopped talking long enough; send what he said
+//   'nudge' - he has said nothing at all; let the tutor speak first
+//   'wait'  - do nothing yet
+function decide(o){
+  if(o.speaking || o.thinking) return 'wait';
+  var said = String(o.heard||'').trim();
+  if(said && o.quietMs >= o.silenceMs) return 'send';
+  if(!said && o.quietMs >= o.idleMs) return 'nudge';
+  return 'wait';
+}
+
+var conv={on:false, heard:'', lastVoiceAt:0, tick:null, interim:''};
+function silenceMs(){ return Math.round((Number(profile.silenceSec)||2.5)*1000); }
+function idleMs(){ return Math.round((Number(profile.idleSec)||10)*1000); }
+function speaking(){ try{ return !!(window.speechSynthesis && speechSynthesis.speaking); }catch(e){ return false; } }
+
+function convStart(){
+  if(!SR){ addError('Este navegador no permite el micrófono. Usa el teclado.'); return; }
+  if(!getKey()){ showSetup(); return; }
+  conv.on=true; conv.heard=''; conv.interim=''; conv.lastVoiceAt=Date.now();
+  startRec(); if(!conv.tick) conv.tick=setInterval(loop,300);
+  paintTalk();
+  if(!convo.length) send('', 'es');     // opening greeting
+}
+function convStop(){
+  conv.on=false; stopRec(); cancelSpeak();
+  if(conv.tick){ clearInterval(conv.tick); conv.tick=null; }
+  paintTalk();
+}
+function loop(){
+  if(!conv.on) return;
+  var act=decide({heard:conv.heard, quietMs:Date.now()-conv.lastVoiceAt,
+                  silenceMs:silenceMs(), idleMs:idleMs(),
+                  speaking:speaking(), thinking:busy});
+  if(act==='send'){
+    var t=conv.heard.trim(); conv.heard=''; conv.interim=''; conv.lastVoiceAt=Date.now();
+    send(t,'es');
+  } else if(act==='nudge'){
+    conv.lastVoiceAt=Date.now();
+    send(NUDGE,'es');
+  }
+  paintTalk();
+}
+function paintTalk(){
+  var b=document.getElementById('talk');
+  var hearing = conv.on && !busy && !speaking();
+  b.className='talk'+(conv.on?' on':'')+(hearing?' hearing':'');
+  b.innerHTML = conv.on ? '&#9632;&nbsp; Parar' : '&#127908;&nbsp; Hablar';
+  document.getElementById('barge').style.display = speaking() ? 'block' : 'none';
+  document.getElementById('bargeTip').style.display = speaking() ? 'block' : 'none';
+  if(busy) hint.textContent='Pensando…';
+  else if(speaking()) hint.textContent='Hablando… toca la pantalla para interrumpir.';
+  else if(conv.on) hint.textContent = conv.interim ? conv.interim : 'Te escucho. Tómate tu tiempo.';
+  else hint.textContent='Toca «Hablar» y empieza una conversación.';
+}
+
+// ---------- microphone ----------
+var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+var rec=null, recWanted=false;
+function startRec(){
+  if(!SR || rec) return;
+  recWanted=true;
+  rec=new SR(); rec.lang='es-MX'; rec.continuous=true; rec.interimResults=true;
+  rec.onresult=function(e){
+    var fin='', inter='';
+    for(var i=e.resultIndex;i<e.results.length;i++){
+      if(e.results[i].isFinal) fin+=e.results[i][0].transcript;
+      else inter+=e.results[i][0].transcript;
+    }
+    if(fin || inter){
+      conv.lastVoiceAt=Date.now();
+      // Only cut the tutor off by voice with headphones on. On a speaker the
+      // mic hears the tutor itself and would interrupt on every single word.
+      if(profile.handsFree && speaking()) cancelSpeak();
+    }
+    if(fin) conv.heard+=fin;
+    conv.interim=(conv.heard+' '+inter).trim();
+    paintTalk();
+  };
+  rec.onerror=function(e){
+    if(e.error==='not-allowed'){
+      convStop();
+      addError('El micrófono está bloqueado. Toca el candado en la barra de direcciones y permite el micrófono.');
+    }
+  };
+  // Chrome ends recognition on its own every so often. Restart while wanted.
+  rec.onend=function(){ rec=null; if(recWanted && conv.on) startRec(); };
+  try{ rec.start(); }catch(e){ rec=null; }
+}
+function stopRec(){ recWanted=false; if(rec){ try{ rec.stop(); }catch(e){} rec=null; } }
 
 // ---------- voice out ----------
 function loadVoices(){
@@ -197,7 +315,7 @@ function loadVoices(){
   var es=voices.filter(function(v){return /^es/i.test(v.lang);});
   var sel=document.getElementById('voice'); sel.innerHTML='';
   if(!es.length){ sel.innerHTML='<option>Sin voz en español en este aparato</option>'; return; }
-  es.sort(function(a,b){ return rank(b)-rank(a); });   // Mexican first
+  es.sort(function(a,b){ return rank(b)-rank(a); });
   es.forEach(function(v){ var o=document.createElement('option'); o.value=v.voiceURI; o.textContent=v.name+' ('+v.lang+')'; sel.appendChild(o); });
   if(profile.voiceURI && es.some(function(v){return v.voiceURI===profile.voiceURI;})) sel.value=profile.voiceURI;
   else { profile.voiceURI=es[0].voiceURI; save(); }
@@ -207,57 +325,35 @@ function rank(v){ var s=0;
   if(/es[-_](US|GT|SV|HN|CO)/i.test(v.lang)) s+=6;
   if(/es[-_]ES/i.test(v.lang)) s+=1;
   if(v.localService) s+=2; return s; }
+function cancelSpeak(){ try{ speechSynthesis.cancel(); }catch(e){} paintTalk(); }
 function speak(t){
   if(!t||!window.speechSynthesis) return;
   try{
     speechSynthesis.cancel();
+    // Without headphones the mic would hear the tutor, so stand it down while
+    // the tutor talks and bring it back the moment it stops.
+    if(!profile.handsFree) stopRec();
     var u=new SpeechSynthesisUtterance(t);
     var v=voices.filter(function(x){return x.voiceURI===profile.voiceURI;})[0];
     if(v) u.voice=v;
     u.lang=v?v.lang:'es-MX';
     u.rate=Number(profile.rate)||0.8;
+    u.onend=u.onerror=function(){
+      conv.lastVoiceAt=Date.now();   // the idle clock starts when IT stops talking
+      if(conv.on && !profile.handsFree) startRec();
+      paintTalk();
+    };
     speechSynthesis.speak(u); lastSpoken=t;
+    paintTalk();
   }catch(e){}
-}
-
-// ---------- voice in ----------
-// Chrome stops listening after a short silence. He freezes up mid-sentence and
-// needs to think, so while the button is lit we restart recognition every time
-// it ends. Nothing sends until he taps the mic again.
-var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-var rec=null, listening=false, heard='';
-function micSupported(){ return !!SR; }
-function startMic(){
-  if(!SR){ addError('Este navegador no permite el micrófono. Usa el micrófono del teclado.'); return; }
-  heard=''; listening=true; paintMic();
-  rec=new SR(); rec.lang=micLang; rec.continuous=true; rec.interimResults=true;
-  rec.onresult=function(e){
-    var fin='';
-    for(var i=e.resultIndex;i<e.results.length;i++) if(e.results[i].isFinal) fin+=e.results[i][0].transcript;
-    if(fin){ heard+=fin; box.value=heard.trim(); sizeBox(); }
-  };
-  rec.onerror=function(e){
-    if(e.error==='not-allowed'){ listening=false; paintMic();
-      addError('El micrófono está bloqueado. Toca el candado en la barra de direcciones y permite el micrófono.'); }
-  };
-  rec.onend=function(){ if(listening){ try{ rec.start(); }catch(e){} } };
-  try{ rec.start(); }catch(e){ listening=false; paintMic(); }
-}
-function stopMic(){
-  listening=false; paintMic();
-  if(rec){ try{ rec.stop(); }catch(e){} rec=null; }
-}
-function paintMic(){
-  var m=document.getElementById('mic');
-  m.className='mic'+(listening?' on':'');
-  hint.textContent=listening?'Escuchando… toca otra vez cuando termines.'
-                            :'Toca el micrófono y habla. Tómate todo el tiempo que quieras.';
 }
 
 // ---------- rendering ----------
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function addMine(t){ var d=document.createElement('div'); d.className='turn me';
   d.innerHTML='<div class="bubble">'+esc(t)+'</div>'; log.appendChild(d); log.scrollTop=log.scrollHeight; }
+function addQuiet(){ var d=document.createElement('div'); d.className='quiet';
+  d.textContent='· · ·'; log.appendChild(d); log.scrollTop=log.scrollHeight; }
 function addError(m){ var d=document.createElement('div'); d.className='turn';
   d.innerHTML='<div class="err">'+esc(m)+'</div>'; log.appendChild(d); log.scrollTop=log.scrollHeight; }
 function addTutor(r){
@@ -283,7 +379,6 @@ function paintLevel(){
   if(pendingCheckpoint){ c.style.display='block'; c.textContent='⚑ Reto: '+pendingCheckpoint; }
   else c.style.display='none';
 }
-function sizeBox(){ box.style.height='auto'; box.style.height=Math.min(box.scrollHeight,130)+'px'; }
 
 // ---------- the prompt ----------
 function systemPrompt(level,mode){
@@ -292,12 +387,14 @@ function systemPrompt(level,mode){
   var p=[];
   p.push('You are a patient Spanish conversation partner for a brand-new American missionary serving in Atlanta, Georgia. He speaks with Mexican and Central American families every day. Use Latin American Spanish - "ustedes" not "vosotros", "carro" not "coche", "papa" not "patata".');
   p.push('');
+  p.push('THIS IS A SPOKEN CONVERSATION. He hears you out loud and answers out loud; he is not reading. Keep every turn short enough to listen to. Never use lists, headings, asterisks, emoji or anything that only works on a page.');
+  p.push('');
   p.push('HIS LEVEL RIGHT NOW: '+level+' of 5.');
   p.push('What that means for how you speak: '+LEVELS[level]);
   p.push('');
   p.push('HOW TO REPLY - three blocks, always in this order, always with these exact markers:');
   p.push(D_ES);
-  p.push('Your reply in Spanish. This gets read aloud, so write it the way it should sound. No stage directions, no asterisks, no emoji, no bullet points.');
+  p.push('Your reply in Spanish. This gets read aloud, so write it the way it should sound.');
   p.push(D_EN);
   p.push('English help. Usually leave this EMPTY. Fill it only when he asked, when he is clearly lost, or when a correction genuinely needs English to land.');
   p.push(D_META);
@@ -310,6 +407,9 @@ function systemPrompt(level,mode){
   p.push('- checkpoint: when he seems ready to move up, a short challenge IN SPANISH he must complete to prove it. Empty otherwise.');
   p.push('- passed: true only on the turn where he clearly completed a checkpoint you set.');
   p.push('');
+  p.push('WHEN HIS TURN IS EXACTLY "'+NUDGE+'":');
+  p.push('He said nothing at all for a while. Do NOT treat it as something he said, and never read it out. He may be thinking, or stuck, or may not have understood. Carry the conversation yourself: ask the same thing again in easier words, offer him two possible answers to choose from, or give him the first few words of a sentence to finish. Keep it short and warm. Never point out that he was quiet, and never scold him for it.');
+  p.push('');
   p.push('CORRECTING HIM - this is how he asked to be taught:');
   p.push('Answer what he actually said FIRST, like a real person would, so the conversation keeps moving. Then put one gentle correction in the meta block. Never interrupt him to correct. Never more than one per turn. Never make him feel stupid.');
   p.push('');
@@ -319,7 +419,7 @@ function systemPrompt(level,mode){
   p.push('PACE - he freezes up when rushed:');
   p.push('One question per turn. Never stack two. Keep your turn shorter than his. If he sends something very short, accept it and build on it rather than asking him to expand.');
   p.push('');
-  p.push('HIS SPEECH ARRIVES FROM A PHONE MICROPHONE, so it has no punctuation and may mis-hear words. Read through obvious transcription noise instead of correcting it as if he said it wrong.');
+  p.push('HIS SPEECH ARRIVES FROM A PHONE MICROPHONE, so it has no punctuation, may be cut off mid-thought, and may mis-hear words. Read through obvious transcription noise instead of correcting it as if he said it wrong. If a turn looks like half a sentence, answer the part you understood.');
   p.push('');
   if(misses.length) p.push('WORDS HE HAS ALREADY MISSED (reuse them naturally so they stick): '+misses.join(', '));
   if(errors.length) p.push('MISTAKES HE REPEATS (watch for these): '+errors.join(' | '));
@@ -334,7 +434,7 @@ function systemPrompt(level,mode){
 function parseReply(raw){
   var t=String(raw||'').trim(), out={es:'',en:'',meta:{}};
   var a=t.indexOf(D_ES), b=t.indexOf(D_EN), c=t.indexOf(D_META);
-  if(a===-1&&b===-1&&c===-1){ out.es=t; return out; }           // never lose a reply
+  if(a===-1&&b===-1&&c===-1){ out.es=t; return out; }
   var esEnd = b!==-1?b : (c!==-1?c:t.length);
   out.es=t.slice(a===-1?0:a+D_ES.length,esEnd).trim();
   if(b!==-1) out.en=t.slice(b+D_EN.length, c!==-1?c:t.length).trim();
@@ -349,20 +449,21 @@ function underCap(){ try{ var r=(localStorage.getItem('tutorDaily')||'').split('
 function bumpCap(){ try{ var r=(localStorage.getItem('tutorDaily')||'').split('|');
   var n=r[0]===today()?Number(r[1]||0)+1:1; localStorage.setItem('tutorDaily',today()+'|'+n); }catch(e){} }
 
-// ---------- the turn ----------
+// ---------- a turn ----------
 function send(override,mode){
   if(busy) return;
   var manual=(override===undefined);
   var text=manual?box.value.trim():String(override);
   if(manual&&!text) return;
-  if(listening) stopMic();
 
   if(!getKey()){ showSetup(); return; }
   if(!underCap()){ addError('Llegaste al límite diario de '+DAILY_CAP+' turnos. Se reinicia mañana.'); return; }
 
-  if(text){ addMine(text); convo.push({role:'me',text:text}); }
-  box.value=''; sizeBox();
-  busy=true; sendBtn.disabled=true; hint.textContent='Pensando…';
+  if(text===NUDGE) addQuiet();
+  else if(text){ addMine(text); }
+  if(text) convo.push({role:'me',text:text});
+  box.value=''; box.style.height='auto';
+  busy=true; paintTalk();
 
   var msgs=[];
   convo.slice(-20).forEach(function(t){
@@ -374,7 +475,7 @@ function send(override,mode){
   ask(systemPrompt(profile.level,mode),msgs).then(function(raw){
     bumpCap(); onReply(parseReply(raw));
   }).catch(function(err){
-    busy=false; sendBtn.disabled=false; paintMic();
+    busy=false; conv.lastVoiceAt=Date.now(); paintTalk();
     addError(String(err&&err.message?err.message:err));
   });
 }
@@ -410,8 +511,7 @@ function ask(system,messages){
         return text;
       });
     }).catch(function(e){
-      // A thrown Error is ours and already readable; a TypeError is the network.
-      if(e instanceof TypeError){
+      if(e instanceof TypeError){   // a thrown Error is ours; a TypeError is the network
         if(attempt<3) return new Promise(function(r){ setTimeout(r,1200); }).then(go);
         throw new Error('Sin conexión. Revisa tu internet e inténtalo otra vez.');
       }
@@ -422,7 +522,7 @@ function ask(system,messages){
 }
 
 function onReply(res){
-  busy=false; sendBtn.disabled=false; paintMic();
+  busy=false;
   addTutor(res); convo.push({role:'tutor',text:res.es});
   var m=res.meta||{};
   profile.turnsAtLevel=(profile.turnsAtLevel||0)+1;
@@ -440,13 +540,24 @@ function onReply(res){
     profile.level+=(want>profile.level?1:-1);   // one step at a time, always
     profile.turnsAtLevel=0; pendingCheckpoint='';
   }
-  save(); paintLevel();
+  conv.lastVoiceAt=Date.now();
+  save(); paintLevel(); paintTalk();
 }
 
 // ---------- wiring ----------
-document.getElementById('mic').onclick=function(){ listening?stopMic():startMic(); };
-sendBtn.onclick=function(){ send(); };
-box.addEventListener('input',sizeBox);
+document.getElementById('talk').onclick=function(){ conv.on?convStop():convStart(); };
+document.getElementById('kbd').onclick=function(){
+  var r=document.getElementById('typerow');
+  r.style.display = r.style.display==='flex' ? 'none' : 'flex';
+  if(r.style.display==='flex') box.focus();
+};
+document.getElementById('barge').onclick=function(){
+  cancelSpeak(); conv.lastVoiceAt=Date.now();
+  if(conv.on && !profile.handsFree) startRec();
+  paintTalk();
+};
+document.getElementById('send').onclick=function(){ send(); };
+box.addEventListener('input',function(){ box.style.height='auto'; box.style.height=Math.min(box.scrollHeight,120)+'px'; });
 box.addEventListener('keydown',function(e){
   var phone=/Android|iPhone|iPad/i.test(navigator.userAgent);
   if(e.key==='Enter'&&!e.shiftKey&&!phone){ e.preventDefault(); send(); }
@@ -458,18 +569,18 @@ document.getElementById('bSlow').onclick=function(){
   document.getElementById('rateVal').textContent=Number(profile.rate).toFixed(2);
   speak(lastSpoken);
 };
-document.getElementById('bLost').onclick=function(){ send('No entiendo.','en'); };
-document.getElementById('bEn').onclick=function(){ send('Can you explain that in English?','en'); };
-document.getElementById('bLang').onclick=function(){
-  micLang=(micLang==='es-MX')?'en-US':'es-MX';
-  this.textContent=(micLang==='es-MX')?'🇲🇽':'🇺🇸';
-  if(listening){ stopMic(); startMic(); }
-};
+document.getElementById('bLost').onclick=function(){ cancelSpeak(); send('No entiendo.','en'); };
+document.getElementById('bEn').onclick=function(){ cancelSpeak(); send('Can you explain that in English?','en'); };
 document.getElementById('gear').onclick=function(){ document.getElementById('panel').style.display='block'; };
 document.getElementById('bClose').onclick=function(){ document.getElementById('panel').style.display='none'; };
 document.getElementById('voice').onchange=function(){ profile.voiceURI=this.value; save(); };
 document.getElementById('rate').oninput=function(){ profile.rate=Number(this.value); save();
   document.getElementById('rateVal').textContent=profile.rate.toFixed(2); };
+document.getElementById('sil').oninput=function(){ profile.silenceSec=Number(this.value); save();
+  document.getElementById('silVal').textContent=profile.silenceSec; };
+document.getElementById('idle').oninput=function(){ profile.idleSec=Number(this.value); save();
+  document.getElementById('idleVal').textContent=profile.idleSec; };
+document.getElementById('hf').onchange=function(){ profile.handsFree=!!this.checked; save(); };
 document.getElementById('lvlSel').onchange=function(){ profile.level=Number(this.value);
   profile.turnsAtLevel=0; pendingCheckpoint=''; save(); paintLevel(); };
 document.getElementById('bTest').onclick=function(){ speak('Hola, élder. Soy tu compañero de español. Vamos a platicar despacio.'); };
@@ -484,16 +595,14 @@ document.getElementById('bImport').onclick=function(){
     profile=p; save(); paintLevel(); loadVoices(); alert('Listo.'); }
   catch(e){ alert('Eso no se pudo leer.'); }
 };
-document.getElementById('bKey').onclick=function(){
-  document.getElementById('panel').style.display='none'; showSetup();
-};
+document.getElementById('bKey').onclick=function(){ document.getElementById('panel').style.display='none'; showSetup(); };
 document.getElementById('bReset').onclick=function(){
   if(!confirm('¿Borrar todo tu progreso?')) return;
+  convStop();
   profile=JSON.parse(JSON.stringify(DEFAULT)); convo=[]; pendingCheckpoint=''; log.innerHTML='';
   save(); paintLevel(); document.getElementById('panel').style.display='none';
 };
 
-// ---------- setup gate ----------
 function showSetup(){ document.getElementById('setup').style.display='block'; document.getElementById('keyIn').value=getKey(); }
 document.getElementById('keySave').onclick=function(){
   var v=document.getElementById('keyIn').value.trim();
@@ -501,16 +610,21 @@ document.getElementById('keySave').onclick=function(){
   setKey(v);
   document.getElementById('setup').style.display='none';
   document.getElementById('keyErr').textContent='';
-  if(!convo.length) send('','es');
+  convStart();
 };
 
 // ---------- go ----------
 if(window.speechSynthesis){ loadVoices(); speechSynthesis.onvoiceschanged=loadVoices; }
-if(!micSupported()) document.getElementById('mic').style.display='none';
+if(!SR){ document.getElementById('talk').style.display='none'; document.getElementById('typerow').style.display='flex'; }
 document.getElementById('rate').value=profile.rate;
 document.getElementById('rateVal').textContent=Number(profile.rate).toFixed(2);
-paintLevel();
-if(!getKey()) showSetup(); else send('','es');
+document.getElementById('sil').value=profile.silenceSec;
+document.getElementById('silVal').textContent=profile.silenceSec;
+document.getElementById('idle').value=profile.idleSec;
+document.getElementById('idleVal').textContent=profile.idleSec;
+document.getElementById('hf').checked=!!profile.handsFree;
+paintLevel(); paintTalk();
+if(!getKey()) showSetup();
 </script>
 </body>
 </html>
