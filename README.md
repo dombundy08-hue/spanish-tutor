@@ -13,7 +13,10 @@ One HTML file, no build step, no server, no account.
 - **You can cut it off.** Tap the screen while it's talking and it stops and
   listens. With headphones on you can enable hands-free and just interrupt by
   talking over it.
-- **The Spanish text starts hidden** so your ear does the work. One tap reveals it.
+- **The Spanish text starts hidden** so your ear does the work. One tap on
+  *Ver texto* reveals every message at once — what is already on screen and
+  everything that arrives afterwards — and tapping again hides them all. The
+  choice is remembered between sessions.
 - **Speed it up or slow it down** mid-conversation with the 🐇 / 🐢 buttons.
 - **It corrects you gently**, after it has answered, one thing per turn.
 - **It hardly ever corrects you.** Being a beginner is not a mistake, and it is
@@ -82,7 +85,7 @@ ever moves **one step at a time**, whatever the model asks for.
 node test/test-tutor-web.js
 ```
 
-77 tests, no network and no browser: the harness pulls the `<script>` block out
+83 tests, no network and no browser: the harness pulls the `<script>` block out
 of `index.html` and runs it against a small fake DOM. They cover reply parsing
 (including malformed replies), the level ladder, the retry policy, the
 conversation clock that decides when to send and when to fill a silence, the

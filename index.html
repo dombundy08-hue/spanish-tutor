@@ -40,9 +40,14 @@
   .turn.me{margin-left:auto}
   .bubble{background:var(--card);border:1px solid var(--line);border-radius:16px 16px 16px 4px;padding:12px 14px}
   .turn.me .bubble{background:#223049;border-radius:16px 16px 4px 16px}
-  .hidden-text{color:var(--dim);font-style:italic}
-  .reveal{background:none;border:1px dashed var(--line);color:var(--dim);border-radius:10px;padding:6px 12px;font-size:14px;cursor:pointer;margin-top:8px}
   .es{font-size:18px}
+  /* Subtitles are one setting, not a decision per bubble. The class lives on
+     <body>, so switching it on reveals everything already on screen and every
+     reply that arrives afterwards. */
+  .es-text{display:none}
+  .es-dots{color:var(--dim);font-style:italic;letter-spacing:3px}
+  body.subs .es-text{display:block}
+  body.subs .es-dots{display:none}
   .en{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);color:#bcd2f0;font-size:16px}
   .fix{margin-top:10px;padding:9px 11px;background:#20281f;border-left:3px solid var(--good);border-radius:0 8px 8px 0;font-size:15px;color:#cfe6d5}
   .words{margin-top:8px;font-size:14px;color:var(--dim)}
@@ -102,6 +107,7 @@
 
 <footer>
   <div class="quick">
+    <button id="bSubs">&#128065; Ver texto</button>
     <button id="bLost">&#10067; No entiendo</button>
     <button id="bRepeat">&#128266; Otra vez</button>
     <button id="bSlow">&#128034; Más despacio</button>
@@ -222,7 +228,7 @@ var sessionTurns=0, lastHelpTurn=-99;
 
 // ---------- state ----------
 var DEFAULT={level:1,misses:[],errors:[],turnsAtLevel:0,checkpoints:[],
-             rate:0.8,voiceURI:'',silenceSec:2.5,idleSec:8,handsFree:false,micLang:'es-MX'};
+             rate:0.8,voiceURI:'',silenceSec:2.5,idleSec:8,handsFree:false,micLang:'es-MX',showText:false};
 var profile=load('tutorProfile',DEFAULT);
 // The idle wait dropped from 10s to 8s (operator, 2026-09-26). Only move a
 // profile still sitting on the old default - a number he chose himself stays.
@@ -644,12 +650,11 @@ function addError(m){ var d=document.createElement('div'); d.className='turn';
 function addTutor(r){
   var d=document.createElement('div'); d.className='turn';
   var b=document.createElement('div'); b.className='bubble';
-  var es=document.createElement('div'); es.className='es hidden-text'; es.textContent='· · · · · ·';
-  var rv=document.createElement('button'); rv.className='reveal'; rv.textContent='Mostrar el texto';
-  rv.onclick=function(){ es.textContent=r.es; es.classList.remove('hidden-text'); rv.remove(); };
+  var es=document.createElement('div'); es.className='es es-text'; es.textContent=r.es;
+  var dots=document.createElement('div'); dots.className='es es-dots'; dots.textContent='· · · · · ·';
   var ag=document.createElement('button'); ag.className='again'; ag.innerHTML='&#128266;';
   ag.onclick=function(){ speakReply(r); };
-  b.appendChild(es); b.appendChild(rv); b.appendChild(ag);
+  b.appendChild(es); b.appendChild(dots); b.appendChild(ag);
   var m=r.meta||{};
   if(r.en){ var f=document.createElement('div'); f.className='fix'; f.textContent=stripTags(r.en); b.appendChild(f); }
   if(m.new_words&&m.new_words.length){ var w=document.createElement('div'); w.className='words';
@@ -875,6 +880,14 @@ box.addEventListener('keydown',function(e){
   var phone=/Android|iPhone|iPad/i.test(navigator.userAgent);
   if(e.key==='Enter'&&!e.shiftKey&&!phone){ e.preventDefault(); send(); }
 });
+function applySubs(){
+  var on=!!profile.showText;
+  document.body.className = on ? 'subs' : '';
+  document.getElementById('bSubs').innerHTML = on ? '&#128584; Ocultar texto' : '&#128065; Ver texto';
+}
+document.getElementById('bSubs').onclick=function(){
+  profile.showText=!profile.showText; save(); applySubs();
+};
 document.getElementById('bRepeat').onclick=function(){ replayLast(); };
 document.getElementById('bSlow').onclick=function(){
   profile.rate=Math.max(0.5,(Number(profile.rate)||0.8)-0.1); save();
@@ -947,7 +960,7 @@ document.getElementById('idle').value=profile.idleSec;
 document.getElementById('idleVal').textContent=profile.idleSec;
 document.getElementById('hf').checked=!!profile.handsFree;
 document.getElementById('micLangSel').value=profile.micLang||'es-MX';
-paintLevel(); paintTalk();
+applySubs(); paintLevel(); paintTalk();
 if(!getKey()) showSetup();
 </script>
 </body>

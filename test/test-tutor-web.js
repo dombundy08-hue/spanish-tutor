@@ -771,6 +771,71 @@ test('74. The same phrase coming straight back is treated as an echo', () => {
   eq(ctx.isEcho([], 'hola', 1000), false);
 });
 
+function lastBubble(ctx) {
+  const log = ctx.document.getElementById('log');
+  const turn = log.children[log.children.length - 1];
+  return turn.children[0];
+}
+
+test('75. Subtitles are off to begin with, but the text is already in the bubble', () => {
+  const { ctx, env } = world();
+  eq(ctx.profile.showText, false);
+  eq(env.document.body.className, '', 'nothing should be revealed yet');
+  ctx.addTutor({ es: 'Hola, \u00e9lder.', en: '', meta: {} });
+  const kids = lastBubble(ctx).children;
+  const text = kids.filter(c => String(c.className).indexOf('es-text') > -1)[0];
+  const dots = kids.filter(c => String(c.className).indexOf('es-dots') > -1)[0];
+  assert(text, 'the real line must be in the DOM even while hidden');
+  eq(text.textContent, 'Hola, \u00e9lder.', 'otherwise it cannot be revealed later');
+  assert(dots, 'and a placeholder shown in its place');
+});
+
+test('76. One tap reveals every message, not just the newest', () => {
+  const { ctx, env } = world();
+  ctx.addTutor({ es: 'Primero', en: '', meta: {} });
+  ctx.addTutor({ es: 'Segundo', en: '', meta: {} });
+  ctx.document.getElementById('bSubs').onclick();
+  eq(env.document.body.className, 'subs', 'the switch is on <body>, so it covers the whole log');
+  eq(ctx.profile.showText, true);
+  // Both bubbles still hold their own text, so both are revealed by that class.
+  const log = ctx.document.getElementById('log');
+  const shown = log.children.map(t => t.children[0].children
+    .filter(c => String(c.className).indexOf('es-text') > -1)[0].textContent);
+  eq(shown.join(','), 'Primero,Segundo');
+});
+
+test('77. A reply that arrives after the toggle is revealed too', () => {
+  const { ctx, env } = world();
+  ctx.document.getElementById('bSubs').onclick();
+  ctx.addTutor({ es: 'Tercero', en: '', meta: {} });
+  eq(env.document.body.className, 'subs', 'new bubbles must not switch it back off');
+  const kids = lastBubble(ctx).children;
+  eq(kids.filter(c => String(c.className).indexOf('es-text') > -1)[0].textContent, 'Tercero');
+});
+
+test('78. Tapping again hides everything and the choice is remembered', () => {
+  const { ctx, env, store } = world();
+  const b = ctx.document.getElementById('bSubs');
+  b.onclick();
+  b.onclick();
+  eq(env.document.body.className, '', 'back to hidden');
+  eq(ctx.profile.showText, false);
+  eq(JSON.parse(store.tutorProfile).showText, false, 'and written down');
+});
+
+test('79. The button says what tapping it will do', () => {
+  const { ctx } = world();
+  const b = ctx.document.getElementById('bSubs');
+  assert(b.innerHTML.indexOf('Ver texto') > -1, 'offers to show: ' + b.innerHTML);
+  b.onclick();
+  assert(b.innerHTML.indexOf('Ocultar texto') > -1, 'offers to hide: ' + b.innerHTML);
+});
+
+test('80. A saved preference is applied on load, before anything is said', () => {
+  const { env } = makeEnv({ store: { tutorProfile: JSON.stringify({ level: 1, showText: true }) } });
+  eq(env.document.body.className, 'subs', 'he should not have to turn it on every session');
+});
+
 // ---------- report ----------
 (async () => {
   for (const t of queue) {
