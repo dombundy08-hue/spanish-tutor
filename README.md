@@ -7,7 +7,7 @@ One HTML file, no build step, no server, no account.
 - **You just talk.** Tap *Hablar* once and it's a conversation — it hears you
   stop, waits a couple of seconds in case you're still thinking, then answers.
   No send button, no submitting text.
-- **If you go quiet it carries the conversation.** Say nothing for ten seconds
+- **If you go quiet it carries the conversation.** Say nothing for eight seconds
   and it speaks first — re-asking in easier words, offering you two answers to
   pick from, or starting a sentence for you to finish.
 - **You can cut it off.** Tap the screen while it's talking and it stops and
@@ -18,7 +18,7 @@ One HTML file, no build step, no server, no account.
 - **Say "no entiendo"** and it switches to English, explains, and goes back.
 
 Both timings are adjustable in settings: how long it waits after you stop
-talking (default 2.5s) and how long before it fills a silence (default 10s).
+talking (default 2.5s) and how long before it fills a silence (default 8s).
 
 ### About the microphone and the speaker
 
@@ -61,7 +61,7 @@ ever moves **one step at a time**, whatever the model asks for.
 node test/test-tutor-web.js
 ```
 
-34 tests, no network and no browser: the harness pulls the `<script>` block out
+40 tests, no network and no browser: the harness pulls the `<script>` block out
 of `index.html` and runs it against a small fake DOM. They cover reply parsing
 (including malformed replies), the level ladder, the retry policy, the
 conversation clock that decides when to send and when to fill a silence, and

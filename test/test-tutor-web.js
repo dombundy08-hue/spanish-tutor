@@ -398,6 +398,51 @@ test('32. The silence marker is explained to the model and never read aloud', ()
   assert(s.toLowerCase().indexOf('spoken conversation') > -1, 'must say this is speech, not text');
 });
 
+test('33. The idle wait defaults to 8 seconds', () => {
+  const { ctx } = world();
+  eq(ctx.profile.idleSec, 8);
+  eq(ctx.decide({ heard: '', quietMs: 8100, silenceMs: 2500, idleMs: ctx.profile.idleSec * 1000,
+                  speaking: false, thinking: false }), 'nudge');
+});
+
+test('34. A profile still on the old 10s default is moved to 8', () => {
+  const old = JSON.stringify({ level: 3, idleSec: 10, misses: ['cobija'] });
+  const { ctx, store } = makeEnv({ store: { tutorProfile: old } });
+  eq(ctx.profile.idleSec, 8, 'should have been migrated');
+  eq(ctx.profile.level, 3, 'the rest of his progress must survive');
+  eq(JSON.parse(store.tutorProfile).idleSec, 8, 'and be written back');
+});
+
+test('35. A wait he chose himself is left alone', () => {
+  const old = JSON.stringify({ level: 1, idleSec: 20 });
+  const { ctx } = makeEnv({ store: { tutorProfile: old } });
+  eq(ctx.profile.idleSec, 20, 'never override a deliberate setting');
+});
+
+test('36. The migration runs once, so a later change to 10 sticks', () => {
+  const chose10 = JSON.stringify({ level: 1, idleSec: 10, settingsV: 2 });
+  const { ctx } = makeEnv({ store: { tutorProfile: chose10 } });
+  eq(ctx.profile.idleSec, 10, 'already-migrated profiles must not be touched again');
+});
+
+test('37. Faster raises the speaking rate and stops at the slider maximum', () => {
+  const { ctx } = world();
+  ctx.profile.rate = 0.8;
+  ctx.document.getElementById('bFast').onclick();
+  eq(Number(ctx.profile.rate.toFixed(2)), 0.9);
+  for (let i = 0; i < 12; i++) ctx.document.getElementById('bFast').onclick();
+  assert(ctx.profile.rate <= 1.2, 'ran past the maximum: ' + ctx.profile.rate);
+});
+
+test('38. Slower still works and stops at the minimum', () => {
+  const { ctx } = world();
+  ctx.profile.rate = 0.6;
+  ctx.document.getElementById('bSlow').onclick();
+  assert(ctx.profile.rate >= 0.5, 'went below the minimum: ' + ctx.profile.rate);
+  for (let i = 0; i < 12; i++) ctx.document.getElementById('bSlow').onclick();
+  eq(Number(ctx.profile.rate.toFixed(2)), 0.5);
+});
+
 // ---------- report ----------
 (async () => {
   for (const t of queue) {

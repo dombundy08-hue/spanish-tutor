@@ -105,6 +105,7 @@
     <button id="bLost">&#10067; No entiendo</button>
     <button id="bRepeat">&#128266; Otra vez</button>
     <button id="bSlow">&#128034; Más despacio</button>
+    <button id="bFast">&#128007; Más rápido</button>
     <button id="bEn">English</button>
   </div>
   <div class="row">
@@ -140,8 +141,8 @@
   <input type="range" id="rate" min="0.5" max="1.2" step="0.05" value="0.8">
   <label>Cuánto espera después de que dejas de hablar — <span id="silVal">2.5</span> s</label>
   <input type="range" id="sil" min="1" max="6" step="0.5" value="2.5">
-  <label>Si no dices nada, empieza a hablar después de — <span id="idleVal">10</span> s</label>
-  <input type="range" id="idle" min="5" max="30" step="1" value="10">
+  <label>Si no dices nada, empieza a hablar después de — <span id="idleVal">8</span> s</label>
+  <input type="range" id="idle" min="5" max="30" step="1" value="8">
   <div class="switch">
     <span>Audífonos (me puede oír mientras habla)</span>
     <input type="checkbox" id="hf">
@@ -203,8 +204,17 @@ var NUDGE='(silencio)';        // sent when he has said nothing for a while
 
 // ---------- state ----------
 var DEFAULT={level:1,misses:[],errors:[],turnsAtLevel:0,checkpoints:[],
-             rate:0.8,voiceURI:'',silenceSec:2.5,idleSec:10,handsFree:false};
+             rate:0.8,voiceURI:'',silenceSec:2.5,idleSec:8,handsFree:false};
 var profile=load('tutorProfile',DEFAULT);
+// The idle wait dropped from 10s to 8s (operator, 2026-09-26). Only move a
+// profile still sitting on the old default - a number he chose himself stays.
+// settingsV is deliberately NOT in DEFAULT: load() fills missing keys from
+// DEFAULT, so putting it there would stamp every old profile as already
+// migrated and the migration would silently never run.
+if(Number(profile.settingsV||0) < 2){
+  if(Number(profile.idleSec)===10) profile.idleSec=8;
+  profile.settingsV=2; save();
+}
 var convo=[], lastSpoken='', pendingCheckpoint='', busy=false, voices=[];
 var log=document.getElementById('log'), box=document.getElementById('box');
 var hint=document.getElementById('hint');
@@ -565,6 +575,12 @@ box.addEventListener('keydown',function(e){
 document.getElementById('bRepeat').onclick=function(){ speak(lastSpoken); };
 document.getElementById('bSlow').onclick=function(){
   profile.rate=Math.max(0.5,(Number(profile.rate)||0.8)-0.1); save();
+  document.getElementById('rate').value=profile.rate;
+  document.getElementById('rateVal').textContent=Number(profile.rate).toFixed(2);
+  speak(lastSpoken);
+};
+document.getElementById('bFast').onclick=function(){
+  profile.rate=Math.min(1.2,(Number(profile.rate)||0.8)+0.1); save();
   document.getElementById('rate').value=profile.rate;
   document.getElementById('rateVal').textContent=Number(profile.rate).toFixed(2);
   speak(lastSpoken);
