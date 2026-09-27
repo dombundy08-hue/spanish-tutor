@@ -14,6 +14,7 @@ One HTML file, no build step, no server, no account.
   listens. With headphones on you can enable hands-free and just interrupt by
   talking over it.
 - **The Spanish text starts hidden** so your ear does the work. One tap reveals it.
+- **Speed it up or slow it down** mid-conversation with the 🐇 / 🐢 buttons.
 - **It corrects you gently**, after it has answered, one thing per turn.
 - **Say "no entiendo"** and it switches to English, explains, and goes back.
 
